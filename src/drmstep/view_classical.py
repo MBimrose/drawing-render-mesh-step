@@ -30,6 +30,8 @@ _MIN_VIEW_AREA_FRAC = 0.01    # ignore regions smaller than 1% of page area
 _MAX_VIEW_AREA_FRAC = 0.6     # ignore the page-frame "region" (almost full page)
 _AXIS_DEG_TOL = 8.0           # lines within ±8° of axis count as axis-aligned
 _TITLE_BLOCK_BOTTOM_FRAC = 0.75  # views below this Y are likely title-block content
+_PAGE_TOP_MARGIN_FRAC = 0.06  # views in the top 6% are likely ruler/border content
+_MAX_ASPECT_RATIO = 4.0       # reject regions more elongated than 4:1 (border strips)
 
 
 def _binarize(image: Image.Image) -> np.ndarray:
@@ -86,16 +88,18 @@ def _split_into_views(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
     inner[:margin_y, :] = 0; inner[-margin_y:, :] = 0
     inner[:, :margin_x] = 0; inner[:, -margin_x:] = 0
 
-    # Erode-then-dilate (opening) with a kernel sized to delete dimension-line/text
-    # widths (~2–3 px) while preserving view interiors.
-    open_kernel = np.ones((3, 3), np.uint8)
-    opened = cv2.morphologyEx(inner, cv2.MORPH_OPEN, open_kernel, iterations=2)
+    # Light opening to remove isolated stray pixels without erasing thin CAD strokes.
+    # CAD line work is often 1–2px wide; iterations=2 with a 3x3 kernel destroyed
+    # most of it on dense drawings.
+    open_kernel = np.ones((2, 2), np.uint8)
+    opened = cv2.morphologyEx(inner, cv2.MORPH_OPEN, open_kernel, iterations=1)
 
-    # Aggressively dilate to bond a view's surviving ink into one connected component.
-    # Kernel size ~1.5% of min(h,w) — closes most intra-view gaps without merging views.
-    blob_size = max(15, int(min(h, w) * 0.015))
+    # Dilation to bond each view's strokes into one connected component without
+    # merging adjacent views. ~0.5% of min(h,w) — a few millimeters at typical
+    # drawing densities.
+    blob_size = max(6, int(min(h, w) * 0.004))
     blob_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (blob_size, blob_size))
-    bonded = cv2.dilate(opened, blob_kernel, iterations=2)
+    bonded = cv2.dilate(opened, blob_kernel, iterations=1)
 
     num_labels, _labels, stats, _ = cv2.connectedComponentsWithStats(bonded, connectivity=8)
 
@@ -113,23 +117,28 @@ def _split_into_views(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
     return boxes
 
 
-def _diagonal_score(binary_region: np.ndarray) -> float:
-    """Return the fraction of Hough line segments in the region that are NOT axis-aligned.
+def _line_features(binary_region: np.ndarray) -> tuple[float, float, int]:
+    """Return (diagonal_frac, angle_concentration, n_lines).
 
-    Axis-aligned = within ±_AXIS_DEG_TOL of horizontal or vertical.
+    ``diagonal_frac`` is the fraction of Hough lines that are NOT axis-aligned.
+    ``angle_concentration`` is high (→ 1) when line angles cluster at a few specific
+    orientations (typical of isometric pictorials with their 30°/90°/150° grid) and
+    low (→ 0) when angles are spread uniformly (typical of orthographic circular
+    views, which decompose a circle into segments at every angle).
     """
     rh, rw = binary_region.shape
     if min(rh, rw) < 30:
-        return 0.0
+        return 0.0, 0.0, 0
     min_line_len = max(20, int(min(rh, rw) * 0.05))
     lines = cv2.HoughLinesP(
         binary_region, rho=1, theta=np.pi / 180, threshold=30,
         minLineLength=min_line_len, maxLineGap=5,
     )
     if lines is None or len(lines) == 0:
-        return 0.0
-    total = 0
-    diagonal = 0
+        return 0.0, 0.0, 0
+
+    angles: list[float] = []
+    n_diagonal = 0
     for x1, y1, x2, y2 in lines[:, 0, :]:
         dx, dy = x2 - x1, y2 - y1
         length = (dx * dx + dy * dy) ** 0.5
@@ -138,13 +147,27 @@ def _diagonal_score(binary_region: np.ndarray) -> float:
         angle = abs(np.degrees(np.arctan2(dy, dx)))
         if angle > 90:
             angle = 180 - angle
-        is_axis = angle < _AXIS_DEG_TOL or abs(angle - 90) < _AXIS_DEG_TOL
-        total += 1
-        if not is_axis:
-            diagonal += 1
-    if total == 0:
-        return 0.0
-    return diagonal / total
+        angles.append(angle)
+        if not (angle < _AXIS_DEG_TOL or abs(angle - 90) < _AXIS_DEG_TOL):
+            n_diagonal += 1
+
+    n = len(angles)
+    if n == 0:
+        return 0.0, 0.0, 0
+
+    # 18 bins covering 0..180° (10° each). Concentration = 1 - normalized entropy.
+    hist, _ = np.histogram(angles, bins=18, range=(0, 180))
+    p = hist / float(n)
+    nz = p > 0
+    H = float(-(p[nz] * np.log(p[nz])).sum())
+    Hmax = float(np.log(len(p)))  # ~ln(18)
+    concentration = 1.0 - (H / Hmax if Hmax > 0 else 0.0)
+    return n_diagonal / float(n), concentration, n
+
+
+def _diagonal_score(binary_region: np.ndarray) -> float:
+    """Backwards-compat: just the diagonal fraction."""
+    return _line_features(binary_region)[0]
 
 
 def find_isometric_bbox(image: Image.Image) -> Optional[tuple[int, int, int, int]]:
@@ -169,18 +192,39 @@ def find_isometric_bbox(image: Image.Image) -> Optional[tuple[int, int, int, int
         area_frac = (bw * bh) / page_area
         if area_frac < _MIN_VIEW_AREA_FRAC or area_frac > _MAX_VIEW_AREA_FRAC:
             continue
-        # Skip likely title-block / signature regions in the bottom-right.
+        # Skip the page-top ruler / sheet-name strip (rulers have lots of axis
+        # diagonals from tick corners and score deceptively high).
+        if y1 / h < _PAGE_TOP_MARGIN_FRAC and bh / h < 0.12:
+            continue
+        # Skip title-block / signature regions at the page bottom.
         cy_frac = ((y1 + y2) / 2) / h
         if cy_frac > _TITLE_BLOCK_BOTTOM_FRAC:
             continue
-        region = binary[y1:y2, x1:x2]
-        diag = _diagonal_score(region)
-        if diag <= 0:
+        # Reject elongated strips (rulers, dimension lanes, border markers).
+        aspect = max(bw, bh) / max(1, min(bw, bh))
+        if aspect > _MAX_ASPECT_RATIO:
             continue
-        score = diag * (area_frac ** 0.5)
+        region = binary[y1:y2, x1:x2]
+        diag, concentration, n_lines = _line_features(region)
+        if diag <= 0 or n_lines < 5:
+            continue
+        # Position prior: ISO/ANSI mechanical drawings place the isometric
+        # pictorial in the upper-right by convention. cx ∈ [0..1] from left,
+        # 1-cy ∈ [0..1] from top → upper-right corner has both ≈1.
+        cx_frac = ((x1 + x2) / 2) / w
+        upper_right = (cx_frac * (1.0 - cy_frac)) ** 0.5  # mild bias
+        # Combined score:
+        #   diag^2     — favor regions where most lines are NOT axis-aligned
+        #                (orthographic + dimension lines have low diag)
+        #   concentration — favor angle-clustered views (isometric, 30/90/150°)
+        #                   over angle-uniform views (orthographic circles)
+        #   upper_right — break ties using drawing convention
+        #   area^0.2   — gentle preference for larger views
+        score = (diag ** 2) * concentration * upper_right * (area_frac ** 0.2)
         logger.debug(
-            "candidate box=(%d,%d,%d,%d) area_frac=%.3f diag=%.3f score=%.4f",
-            x1, y1, x2, y2, area_frac, diag, score,
+            "candidate box=(%d,%d,%d,%d) area_frac=%.3f aspect=%.2f "
+            "diag=%.3f conc=%.3f ur=%.3f score=%.4f",
+            x1, y1, x2, y2, area_frac, aspect, diag, concentration, upper_right, score,
         )
         if best is None or score > best[0]:
             best = (score, box)
