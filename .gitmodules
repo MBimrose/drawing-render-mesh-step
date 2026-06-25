@@ -1,0 +1,6 @@
+[submodule "third_party/CADFit"]
+	path = third_party/CADFit
+	url = https://github.com/ghadinehme/CADFit
+[submodule "third_party/Hunyuan3D-2"]
+	path = third_party/Hunyuan3D-2
+	url = https://github.com/Tencent/Hunyuan3D-2

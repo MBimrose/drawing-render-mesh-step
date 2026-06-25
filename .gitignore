@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Runtime caches
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Pipeline output
+/output/
+/runs/
+/submission/
+/submission.zip
+work_*/
+*.glb
+*.stl
+!tests/fixtures/**/*.stl
+*.step
+*.stp
+!tests/fixtures/**/*.step
+
+# Model weights
+hf_cache/
+.hf_home/
+
+# Logs
+*.log
