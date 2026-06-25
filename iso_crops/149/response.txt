@@ -1,3 +1,0 @@
-The drawing includes an isometric pictorial view (upper-right), a top view (upper-left), a front view (lower-left, labeled “DETAIL A”), and a side elevation (lower-right). The isometric view is the largest 3D rendering of the whole part, occupying roughly the upper-right quadrant (columns 7–11, rows B–D). It is shaded/lined to show depth and features, and is not an orthographic projection or section. No other full-part 3D pictorials are present.
----
-{"bbox": [688, 158, 920, 508]}

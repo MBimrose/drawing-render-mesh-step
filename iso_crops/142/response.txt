@@ -1,3 +1,0 @@
-The drawing shows a front view, a detail view (Detail A), a side view (left profile), and an isometric pictorial. The isometric pictorial is located in the upper-right quadrant of the sheet, occupying roughly a 3x3 grid cell area (columns 9–11, rows B–D). It is the only 3D pictorial of the whole part and is the largest such view present.
----
-{"bbox": [784, 178, 958, 570]}

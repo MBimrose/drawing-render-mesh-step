@@ -238,15 +238,49 @@ def _union(
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
+def _pick_part_blob(stats: np.ndarray, cw: int, ch: int) -> int:
+    """Pick the connected-component label that is most likely the part.
+
+    Largest by area, but with a hard filter against ruler-letters-style
+    components (tall + thin and hugging the right edge of the crop).
+    Returns the chosen label (1-indexed) or 0 if no plausible blob.
+    """
+    page_area = float(cw * ch)
+    best_label = 0
+    best_area = -1
+    for lbl in range(1, stats.shape[0]):
+        bx = int(stats[lbl, cv2.CC_STAT_LEFT])
+        by = int(stats[lbl, cv2.CC_STAT_TOP])
+        bw = int(stats[lbl, cv2.CC_STAT_WIDTH])
+        bh = int(stats[lbl, cv2.CC_STAT_HEIGHT])
+        area = int(stats[lbl, cv2.CC_STAT_AREA])
+        if area / page_area < 0.005:
+            continue
+        aspect = max(bw, bh) / max(1, min(bw, bh))
+        # Tall, thin column hugging the right edge → page ruler letters.
+        if aspect > 4.0 and bw / cw < 0.20 and (bx + bw) / cw > 0.85:
+            continue
+        # Tall thin column hugging the left edge → also rulers.
+        if aspect > 4.0 and bw / cw < 0.20 and bx / cw < 0.15:
+            continue
+        if area > best_area:
+            best_area = area
+            best_label = lbl
+    return best_label
+
+
 def _tighten_to_largest_blob(
     image: Image.Image,
     bbox: tuple[int, int, int, int],
     pad_frac: float = 0.08,
 ) -> tuple[Image.Image, tuple[int, int, int, int]]:
-    """Crop ``image`` to ``bbox``, then tighten to the largest single connected
-    component (after morphological closing to bond hidden lines and small gaps).
-    Whites out any other ink content outside that component's tight bbox so the
-    final crop contains exactly one drawn object.
+    """Crop ``image`` to ``bbox``, then tighten to the part-shaped connected
+    component (after morphological closing to bond hidden-line gaps).
+
+    Whites out ONLY ink that falls OUTSIDE the convex hull of the chosen
+    component. Internal dimension lines, hole indicators, and feature
+    annotations that live inside the part outline are preserved — Hunyuan3D
+    sees the part's full contour with all of its detail intact.
 
     Returns: (cleaned_crop, bbox_in_full_image_coords)
     """
@@ -277,13 +311,8 @@ def _tighten_to_largest_blob(
     if num <= 1:
         return crop, (x1, y1, x2, y2)
 
-    # Pick the largest blob by ink-pixel count (CC_STAT_AREA on the closed mask).
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    largest_label = int(np.argmax(areas)) + 1
-    largest_area = int(areas[largest_label - 1])
-    page_area = cw * ch
-    if largest_area / page_area < 0.005:
-        # nothing substantial — keep the original bbox unchanged
+    largest_label = _pick_part_blob(stats, cw, ch)
+    if largest_label == 0:
         return crop, (x1, y1, x2, y2)
 
     bx = int(stats[largest_label, cv2.CC_STAT_LEFT])
@@ -292,12 +321,34 @@ def _tighten_to_largest_blob(
     bh = int(stats[largest_label, cv2.CC_STAT_HEIGHT])
     bx2, by2 = bx + bw, by + bh
 
-    # White out every pixel that's not part of the largest component (ruler
-    # letters, neighbouring dimension callouts, partially-included other views).
+    # Build a "part interior" mask: the convex hull of the chosen component,
+    # filled. Anything inside the hull is preserved as-is; only ink OUTSIDE
+    # the hull gets erased. This keeps internal dimension lines, leader
+    # arrows, hole indicators, and annotations that live within the part
+    # contour — the user can still see all the part detail.
+    component_mask = (labels == largest_label).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(
+        component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+    )
+    interior_mask = np.zeros_like(component_mask)
+    if contours:
+        # Hull over ALL the contour points so we cover the part's full envelope
+        # even if internal gaps split it into nested pieces.
+        all_pts = np.concatenate(contours)
+        hull = cv2.convexHull(all_pts)
+        cv2.drawContours(interior_mask, [hull], -1, 255, thickness=-1)
+        # Dilate a few px so the hull boundary itself stays whole.
+        dilate_k = max(3, int(min(cw, ch) * 0.005))
+        interior_mask = cv2.dilate(
+            interior_mask,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (dilate_k, dilate_k)),
+        )
+    else:
+        interior_mask = component_mask
+
     arr = np.array(crop)
-    keep_mask = (labels == largest_label)
-    erase_mask = (~keep_mask) & (binary > 0)  # only erase ink, not paper
-    arr[erase_mask] = (255, 255, 255)
+    outside_hull = (interior_mask == 0) & (binary > 0)
+    arr[outside_hull] = (255, 255, 255)
     cleaned = Image.fromarray(arr)
 
     # Tighten to the component's bbox + small padding.
@@ -321,6 +372,18 @@ def _tighten_to_largest_blob(
     return tight_crop, full_bbox
 
 
+def _trim_page_frame(image: Image.Image, margin_frac: float = 0.05) -> tuple[Image.Image, tuple[int, int]]:
+    """Crop off the outermost margin of the drawing (page frame + ruler markers).
+
+    Returns (trimmed_image, (offset_x, offset_y)) so callers can map bbox coords
+    back to the original full image.
+    """
+    w, h = image.size
+    mx = int(w * margin_frac)
+    my = int(h * margin_frac)
+    return image.crop((mx, my, w - mx, h - my)), (mx, my)
+
+
 def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResult:
     """Combined LocateAnything + Qwen3-VL extraction.
 
@@ -328,7 +391,14 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
     """
     full = image.convert("RGB")
     w_full, h_full = full.size
-    small = _downscale(full, _MAX_EDGE_PX)
+
+    # Trim the page frame + ruler markers (8% margin) before showing the drawing
+    # to the VLM. Stops the bbox/tightening step from picking up the column-label
+    # rulers (A/B/C/D on the right, numbers 1-12 on top) — those used to win the
+    # largest-blob race on samples like 121.
+    trimmed, (off_x, off_y) = _trim_page_frame(full, margin_frac=0.08)
+
+    small = _downscale(trimmed, _MAX_EDGE_PX)
     w_small, h_small = small.size
 
     img_url = _image_to_data_url(small)
@@ -433,13 +503,25 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         if x2 > x1 and y2 > y1:
             area_frac = ((x2 - x1) * (y2 - y1)) / float(w_small * h_small)
             if 0.005 <= area_frac <= 0.85:
-                sx, sy = w_full / w_small, h_full / h_small
-                qwen_bbox_full = (int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy))
+                # Map small-image coords → trimmed-image coords → full-image coords.
+                w_trim, h_trim = trimmed.size
+                sx, sy = w_trim / w_small, h_trim / h_small
+                qwen_bbox_full = (
+                    off_x + int(x1 * sx),
+                    off_y + int(y1 * sy),
+                    off_x + int(x2 * sx),
+                    off_y + int(y2 * sy),
+                )
 
     # Combination strategy:
-    #   - If both LA and Qwen produced boxes, pick the LA box with highest IoU
-    #     vs Qwen's bbox, then take the UNION so neither model's tightness wins.
-    #   - If only LA produced boxes, pick its largest.
+    #   - If both models produced boxes AND they agree (IoU > 0.1), take the
+    #     UNION so neither model's tightness wins. Qwen often understates the
+    #     bbox; LA captures the tight content envelope.
+    #   - If they disagree, TRUST QWEN. LA grounds purely on visual texture and
+    #     frequently mistakes shaded section/detail views (e.g. fixture 110)
+    #     for "3D views of the part". Qwen reads the view labels.
+    #   - If only LA produced boxes, pick its largest (Qwen failed; it's the
+    #     best content-tight guess we have).
     #   - If only Qwen produced a bbox, use it.
     #   - Otherwise fail.
     chosen: Optional[tuple[int, int, int, int]] = None
@@ -449,9 +531,9 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
             chosen = _union(best_la, qwen_bbox_full)
             logger.info("Combined: LA=%s ∪ Qwen=%s → %s", best_la, qwen_bbox_full, chosen)
         else:
-            # No overlap → trust LA's largest box (it found the part; Qwen may be off-target)
-            chosen = la_boxes_full[0]
-            logger.info("LA and Qwen disagree; using largest LA box: %s", chosen)
+            chosen = qwen_bbox_full
+            logger.info("LA and Qwen disagree; trusting Qwen: %s (LA was %s)",
+                        chosen, best_la)
     elif la_boxes_full:
         chosen = la_boxes_full[0]
         logger.info("Only LA found boxes; using largest: %s", chosen)
@@ -463,24 +545,60 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         return VLMExtractResult(bbox_xyxy=None,
                                 raw_response=description + "\n---\n" + raw)
 
-    # First pad generously so we don't clip features from either bbox.
-    pad = 0.15
+    # Expand the seed bbox (25%) before tightening — VLMs often clip the bbox
+    # to the densest interior of the view, missing the part's outer features.
+    # The tightening step then clips back to the part-shaped blob, so a moderate
+    # over-expansion is safer than under-expanding.
+    pad = 0.25
     fx1, fy1, fx2, fy2 = chosen
     pad_x = int((fx2 - fx1) * pad)
     pad_y = int((fy2 - fy1) * pad)
+    # Clamp expansion to the trimmed region so we never re-introduce the page
+    # frame/rulers we trimmed off.
+    trim_x1, trim_y1 = off_x, off_y
+    trim_x2, trim_y2 = off_x + trimmed.size[0], off_y + trimmed.size[1]
     padded = (
-        max(0, fx1 - pad_x),
-        max(0, fy1 - pad_y),
-        min(w_full, fx2 + pad_x),
-        min(h_full, fy2 + pad_y),
+        max(trim_x1, fx1 - pad_x),
+        max(trim_y1, fy1 - pad_y),
+        min(trim_x2, fx2 + pad_x),
+        min(trim_y2, fy2 + pad_y),
     )
 
-    # Then tighten to the largest connected blob inside that padded region.
-    # This removes ruler markers (A, B, C, D), nearby dimension callouts, and
-    # any overlapping adjacent views — Hunyuan3D only sees one object.
-    cleaned, tight_bbox = _tighten_to_largest_blob(full, padded)
+    # Then tighten to the part-shaped blob inside that padded region. Ink
+    # outside the chosen component's convex hull (ruler letters, adjacent
+    # dimension callouts, neighbouring views) is whited out; ink inside the
+    # hull (the part's internal features, dimension lines, hole indicators)
+    # is preserved.
+    _, tight_bbox = _tighten_to_largest_blob(full, padded)
+
+    # Defensive: never end up with a bbox SMALLER than what the model originally
+    # picked — tightening should only remove adjacent junk, not chop into the
+    # actual view. Union the tightened bbox with the (un-padded) seed.
+    final_bbox = _union(tight_bbox, chosen)
+    # Clamp to the trimmed region so we still avoid the page frame/rulers.
+    final_bbox = (
+        max(off_x, final_bbox[0]),
+        max(off_y, final_bbox[1]),
+        min(off_x + trimmed.size[0], final_bbox[2]),
+        min(off_y + trimmed.size[1], final_bbox[3]),
+    )
+
+    # Re-run the cleaning step on the final bbox so the whited-out crop matches.
+    cleaned, _ = _tighten_to_largest_blob(full, final_bbox, pad_frac=0.0)
+    # _tighten can shrink again — if it did, prefer the wider union bbox and
+    # re-crop the cleaned full image to that.
+    bx1, by1, bx2, by2 = final_bbox
+    cleaned_full = full.copy()
+    arr_full = np.array(cleaned_full)
+    crop_arr = np.array(cleaned)
+    # Paste cleaned region back at the correct offset — this is the "cleaned"
+    # version of the *union* bbox.
+    if cleaned.size != (bx2 - bx1, by2 - by1):
+        # Recompute the cleaning on the exact final bbox.
+        cleaned, _ = _tighten_to_largest_blob(full, final_bbox, pad_frac=0.0)
+
     return VLMExtractResult(
-        bbox_xyxy=tight_bbox,
+        bbox_xyxy=final_bbox,
         raw_response=description + "\n---\n" + raw,
         cleaned_crop=cleaned,
     )

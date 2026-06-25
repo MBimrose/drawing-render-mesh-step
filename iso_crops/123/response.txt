@@ -1,3 +1,0 @@
-The drawing includes orthographic views (front, top, side), section views (B-B, C-C), and a single isometric pictorial. The isometric view is located in the upper-right quadrant of the sheet, occupying roughly a 3x3 grid area (columns 8–11, rows A–C). It is the only 3D pictorial of the whole part and is the largest such view present.
----
-{"bbox": [720, 200, 900, 450]}
