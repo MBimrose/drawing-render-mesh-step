@@ -23,11 +23,11 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 # Alpha-wrap parameters tuned for Hunyuan3D-2 output (mesh normalized roughly to ±1).
-# Smaller alpha_fraction = more faces / sharper detail preserved; smaller offset_fraction
-# = less inflation of the wrap shell. These keep small features (holes, fillets) while
-# closing self-intersections so manifold3d-based IoU can score the candidate.
-_ALPHA_WRAP_FRACTION = 0.003
-_OFFSET_FRACTION = 0.001
+# alpha_fraction = 0.01 produces ~15k watertight faces — coarse enough that CADFit's
+# sketch extraction stays fast (a denser mesh has the same logical features but blows
+# up runtime), while still preserving holes and fillets.
+_ALPHA_WRAP_FRACTION = 0.01
+_OFFSET_FRACTION = 0.003
 
 
 class MeshGenError(RuntimeError):
