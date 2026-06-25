@@ -1,0 +1,3 @@
+The drawing shows one isometric pictorial view of the entire part, located in the upper-right quadrant (grid area B8–C10). It is the only 3D rendering present and is approximately 3–4 inches wide by 2–3 inches tall on the page. No orthographic, section, or detail views are shown — only the isometric and dimensioned flat layout.
+---
+{"bbox": [778, 228, 938, 437]}

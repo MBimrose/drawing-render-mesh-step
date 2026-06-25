@@ -1,0 +1,3 @@
+The drawing includes orthographic views (front, side), sections (A-A, B-B, E-E), and details (C, D), plus two isometric pictorials. The largest isometric pictorial of the whole part is in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It’s a shaded 3D rendering showing the full part geometry, larger than the second, smaller isometric view below it.
+---
+{"bbox": [784, 107, 947, 320]}

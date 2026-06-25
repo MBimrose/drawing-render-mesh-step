@@ -1,0 +1,3 @@
+The drawing includes: Top view (main circular view), Section A-A, Section C-C, Detail B, and an isometric pictorial. The isometric pictorial is located in the upper-right quadrant, roughly spanning columns 8–11 and rows B–D. It is the largest 3D rendering of the whole part and shows the full geometry with shading/lines for depth. No other full-part 3D views are present.
+---
+{"bbox": [758, 207, 1072, 585]}

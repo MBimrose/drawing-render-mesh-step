@@ -1,0 +1,3 @@
+The drawing includes front, top, right-side orthographic views, Section B-B, and two isometric pictorials. The largest isometric view of the whole part is located in the upper-right quadrant, occupying roughly a 3x3 grid cell area (columns 9–11, rows B–D). A second, smaller isometric view appears below it in the lower-right (rows D–F). Both are shaded 3D renderings, not orthographic or sectional views.
+---
+{"bbox": [778, 145, 958, 470]}

@@ -1,0 +1,3 @@
+The drawing includes: isometric pictorial, front view, top view, right-side view, sections E-E, F-F, H-H, and details D, G. The main isometric pictorial is in the upper-right quadrant, roughly 1/4 of the page width and 1/3 height. It’s the largest 3D view of the whole part; no other full-part pictorials are present.
+---
+{"bbox": [778, 124, 930, 450]}

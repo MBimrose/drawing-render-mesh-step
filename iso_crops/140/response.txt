@@ -1,0 +1,3 @@
+The drawing includes orthographic views (front, top, side), Section A-A, Detail C, Detail D, and two isometric pictorials. The largest isometric pictorial of the whole part is in the upper-right quadrant, roughly 1/4 the page width and height. A second, smaller isometric view appears below it, near the lower-right. The main 3D view is shaded and shows the full assembly with mounting features.
+---
+{"bbox": [784, 137, 967, 355]}

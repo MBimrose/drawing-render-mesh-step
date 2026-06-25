@@ -1,0 +1,3 @@
+The drawing shows one isometric pictorial view of the entire part, located in the upper-right quadrant (approx. grid area 8–11, B–D). It is the only 3D rendering and is roughly 1/4 the page width and 1/3 the page height. No other isometric or pictorial views of the whole part are present.
+---
+{"bbox": [758, 208, 927, 400]}
