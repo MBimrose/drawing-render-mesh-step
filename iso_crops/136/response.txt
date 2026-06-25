@@ -1,3 +1,0 @@
-The drawing includes orthographic views (top, front, side), Section B-B, and Details D, E, and F. The single isometric pictorial view of the whole part is located in the upper-right quadrant (grid area B9–C11), approximately 150x100 mm in size. It is the only 3D rendering of the full part and is the largest pictorial view present.
----
-{"bbox": [800, 180, 960, 350]}

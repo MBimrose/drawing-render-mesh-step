@@ -1,3 +1,0 @@
-The drawing shows three distinct views: a top view (lower-left), a front view (center), and an isometric pictorial (upper-right). The isometric view is located in the upper-right quadrant, occupying roughly 1/4 of the page area. It is the only 3D pictorial of the whole part and is the largest such view present.
----
-{"bbox": [708, 147, 948, 507]}

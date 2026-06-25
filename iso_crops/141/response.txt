@@ -1,3 +1,0 @@
-The drawing includes top, front, side, section A-A, and two isometric pictorial views. The largest isometric pictorial of the whole part is located in the upper-right quadrant, roughly spanning from grid lines C-D to E-F and columns 8-11. It is approximately 1/4 the page width and 1/3 the page height. A second, smaller isometric view appears just below it.
----
-{"bbox": [708, 347, 900, 570]}

@@ -28,7 +28,9 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
+import cv2
 import litellm
+import numpy as np
 from PIL import Image
 
 from .config import Config
@@ -49,6 +51,7 @@ _MAX_EDGE_PX = 1536  # cap for the VLM call
 class VLMExtractResult:
     bbox_xyxy: Optional[tuple[int, int, int, int]]
     raw_response: str
+    cleaned_crop: Optional[Image.Image] = None
 
 
 def _image_to_data_url(image: Image.Image) -> str:
@@ -235,6 +238,89 @@ def _union(
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
+def _tighten_to_largest_blob(
+    image: Image.Image,
+    bbox: tuple[int, int, int, int],
+    pad_frac: float = 0.08,
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """Crop ``image`` to ``bbox``, then tighten to the largest single connected
+    component (after morphological closing to bond hidden lines and small gaps).
+    Whites out any other ink content outside that component's tight bbox so the
+    final crop contains exactly one drawn object.
+
+    Returns: (cleaned_crop, bbox_in_full_image_coords)
+    """
+    w_full, h_full = image.size
+    x1, y1, x2, y2 = bbox
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w_full, x2), min(h_full, y2)
+    if x2 <= x1 or y2 <= y1:
+        return image.crop(bbox), bbox
+
+    crop = image.crop((x1, y1, x2, y2)).convert("RGB")
+    cw, ch = crop.size
+
+    # Binarize: ink = 255, paper = 0.
+    gray = np.array(crop.convert("L"))
+    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+
+    # Closing: bond hidden-line gaps + thin disconnections WITHIN the part.
+    # Kernel size ~1% of crop's smaller dim — large enough to bridge the part's
+    # internal gaps, small enough to NOT bond it to adjacent ruler labels.
+    close_k = max(5, int(min(cw, ch) * 0.012))
+    closed = cv2.morphologyEx(
+        binary, cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (close_k, close_k)),
+    )
+
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+    if num <= 1:
+        return crop, (x1, y1, x2, y2)
+
+    # Pick the largest blob by ink-pixel count (CC_STAT_AREA on the closed mask).
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    largest_label = int(np.argmax(areas)) + 1
+    largest_area = int(areas[largest_label - 1])
+    page_area = cw * ch
+    if largest_area / page_area < 0.005:
+        # nothing substantial — keep the original bbox unchanged
+        return crop, (x1, y1, x2, y2)
+
+    bx = int(stats[largest_label, cv2.CC_STAT_LEFT])
+    by = int(stats[largest_label, cv2.CC_STAT_TOP])
+    bw = int(stats[largest_label, cv2.CC_STAT_WIDTH])
+    bh = int(stats[largest_label, cv2.CC_STAT_HEIGHT])
+    bx2, by2 = bx + bw, by + bh
+
+    # White out every pixel that's not part of the largest component (ruler
+    # letters, neighbouring dimension callouts, partially-included other views).
+    arr = np.array(crop)
+    keep_mask = (labels == largest_label)
+    erase_mask = (~keep_mask) & (binary > 0)  # only erase ink, not paper
+    arr[erase_mask] = (255, 255, 255)
+    cleaned = Image.fromarray(arr)
+
+    # Tighten to the component's bbox + small padding.
+    pad_x = int(bw * pad_frac)
+    pad_y = int(bh * pad_frac)
+    tight = (
+        max(0, bx - pad_x),
+        max(0, by - pad_y),
+        min(cw, bx2 + pad_x),
+        min(ch, by2 + pad_y),
+    )
+    tight_crop = cleaned.crop(tight)
+
+    # Map tight crop's bbox back to full-image coordinates.
+    full_bbox = (
+        x1 + tight[0],
+        y1 + tight[1],
+        x1 + tight[2],
+        y1 + tight[3],
+    )
+    return tight_crop, full_bbox
+
+
 def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResult:
     """Combined LocateAnything + Qwen3-VL extraction.
 
@@ -377,7 +463,7 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         return VLMExtractResult(bbox_xyxy=None,
                                 raw_response=description + "\n---\n" + raw)
 
-    # Apply 15% padding so we don't clip features from either model's bbox.
+    # First pad generously so we don't clip features from either bbox.
     pad = 0.15
     fx1, fy1, fx2, fy2 = chosen
     pad_x = int((fx2 - fx1) * pad)
@@ -389,4 +475,12 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         min(h_full, fy2 + pad_y),
     )
 
-    return VLMExtractResult(bbox_xyxy=padded, raw_response=description + "\n---\n" + raw)
+    # Then tighten to the largest connected blob inside that padded region.
+    # This removes ruler markers (A, B, C, D), nearby dimension callouts, and
+    # any overlapping adjacent views — Hunyuan3D only sees one object.
+    cleaned, tight_bbox = _tighten_to_largest_blob(full, padded)
+    return VLMExtractResult(
+        bbox_xyxy=tight_bbox,
+        raw_response=description + "\n---\n" + raw,
+        cleaned_crop=cleaned,
+    )

@@ -382,16 +382,20 @@ def _extract_with_vlm(image: Image.Image, config: Config) -> ExtractResult:
 
     Two-pass: VLM describes views, then locates the isometric bbox. On VLM
     failure or implausible bbox, falls back to the classical CV scorer.
+
+    Uses the ``cleaned_crop`` from view_vlm if available — that's the bbox
+    crop with non-largest-blob ink content whited out, so Hunyuan3D sees
+    only one object even when ruler letters or small dimension fragments
+    leaked into the bbox.
     """
     from . import view_vlm
 
     image_full = image.convert("RGB")
-    w_full, h_full = image_full.size
     res = view_vlm.extract_isometric_bbox(image_full, config)
     if res.bbox_xyxy is None:
         logger.info("view extraction (vlm): no bbox; falling back to classical CV")
         return _extract_with_classical(image, config)
-    crop = image_full.crop(res.bbox_xyxy)
+    crop = res.cleaned_crop if res.cleaned_crop is not None else image_full.crop(res.bbox_xyxy)
     return ExtractResult(image=crop, bbox_xyxy=res.bbox_xyxy, raw_response=res.raw_response)
 
 

@@ -1,3 +1,0 @@
-The drawing includes orthographic views (top, front, side), sections (A-A, B-B, C-C, D-D, F-F), and a detail view (E). The primary isometric pictorial of the whole part is located in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is the largest 3D rendering shown and depicts the full assembled part with internal features visible. A smaller isometric view appears below it, but the upper-right one is the main pictorial.
----
-{"bbox": [1164, 105, 1420, 315]}

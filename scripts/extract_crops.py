@@ -73,7 +73,8 @@ def _process_sample(sample: str, inputs_dir: Path, out_dir: Path) -> tuple[str, 
         return sample, False, "VLM returned no bbox"
 
     try:
-        crop = drawing.crop(res.bbox_xyxy)
+        # Prefer the cleaned crop (non-part ink whited out) if available.
+        crop = res.cleaned_crop if res.cleaned_crop is not None else drawing.crop(res.bbox_xyxy)
         crop.save(sample_out / "crop.png")
     except Exception as exc:
         return sample, False, f"crop failed: {exc}"

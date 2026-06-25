@@ -1,3 +1,0 @@
-The drawing includes: front, top, right-side orthographic views, section A-A, detail B, and two isometric pictorials. The largest isometric pictorial (showing the full part) is located in the upper-right quadrant, roughly spanning columns 9–11 and rows B–D. It is approximately 3 grid squares wide and 3 tall, making it the most prominent 3D representation.
----
-{"bbox": [1100, 140, 1300, 500]}
