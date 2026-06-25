@@ -35,11 +35,12 @@ class Config(BaseModel):
     locate_anything_model: str = "nvidia/LocateAnything-3B"
 
     # View-extraction backend:
-    #   "classical"      — OpenCV whitespace-split + diagonal-line scoring (default)
+    #   "vlm"            — Multi-stage Qwen3-VL (default; falls back to classical)
+    #   "classical"      — OpenCV whitespace-split + diagonal-line scoring
     #   "locate_anything" — NVIDIA LocateAnything-3B in-process
-    #   "qwen"            — Qwen3-VL via litellm
+    #   "qwen"            — Legacy single-call Qwen3-VL
     view_backend: str = Field(
-        default_factory=lambda: os.environ.get("DRMSTEP_VIEW_BACKEND", "classical")
+        default_factory=lambda: os.environ.get("DRMSTEP_VIEW_BACKEND", "vlm")
     )
 
     # Hunyuan3D request defaults

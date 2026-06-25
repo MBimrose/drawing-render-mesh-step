@@ -377,14 +377,34 @@ def _extract_with_classical(image: Image.Image, config: Config) -> ExtractResult
                          raw_response=f"classical: bbox={bbox} area_frac={area_frac:.3f}")
 
 
+def _extract_with_vlm(image: Image.Image, config: Config) -> ExtractResult:
+    """Multi-stage Qwen3-VL extraction with classical CV fallback.
+
+    Two-pass: VLM describes views, then locates the isometric bbox. On VLM
+    failure or implausible bbox, falls back to the classical CV scorer.
+    """
+    from . import view_vlm
+
+    image_full = image.convert("RGB")
+    w_full, h_full = image_full.size
+    res = view_vlm.extract_isometric_bbox(image_full, config)
+    if res.bbox_xyxy is None:
+        logger.info("view extraction (vlm): no bbox; falling back to classical CV")
+        return _extract_with_classical(image, config)
+    crop = image_full.crop(res.bbox_xyxy)
+    return ExtractResult(image=crop, bbox_xyxy=res.bbox_xyxy, raw_response=res.raw_response)
+
+
 def extract_isometric_view(image: Image.Image, config: Config) -> ExtractResult:
     """Crop the isometric view from a multi-view engineering drawing.
 
     Backend is chosen by ``config.view_backend``. Falls back to the full image
     when grounding fails.
     """
-    backend = getattr(config, "view_backend", "classical")
-    if backend == "qwen":
+    backend = getattr(config, "view_backend", "vlm")
+    if backend == "vlm":
+        return _extract_with_vlm(image, config)
+    if backend == "qwen":  # legacy alias
         return _extract_with_qwen(image, config)
     if backend == "locate_anything":
         return _extract_with_locate_anything(image, config)
