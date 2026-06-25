@@ -118,8 +118,9 @@ _USER_DESCRIBE = (
     "This is a mechanical engineering drawing of a single part. "
     "List the distinct views shown (e.g. top, front, side, section A-A, isometric pictorial, "
     "detail B, etc.). For the ISOMETRIC pictorial view (the shaded/lined 3D rendering of the "
-    "whole part — NOT any orthographic projection, section, or detail), describe roughly "
-    "where it is on the page (upper-left, upper-right, center, etc.) and its approximate size. "
+    "whole part — NOT any orthographic projection, section, detail view, OR DIMENSION TABLE "
+    "containing rows of numerical values), describe roughly where it is on the page "
+    "(upper-left, upper-right, center, etc.) and its approximate size. "
     "If multiple 3D pictorial views exist, identify the largest single one of the whole part. "
     "Reply in 2-4 short sentences."
 )
@@ -141,7 +142,9 @@ def _build_locate_prompt(w: int, h: int, description: str) -> str:
         "IMPORTANT: be GENEROUS — the bbox MUST include EVERY pixel of the 3D pictorial "
         "(every fillet, every hole, every feature, every protrusion) plus a small margin "
         "of whitespace around it. It is MUCH worse to cut off part of the geometry than "
-        "to include some extra blank space. Do not include other views or the title block. "
+        "to include some extra blank space. "
+        "DO NOT return the bbox of: orthographic views, section views, detail views, the "
+        "title block, OR any dimension table (a rectangular grid of numerical values). "
         "Reply with ONLY the JSON object: {\"bbox\": [x1, y1, x2, y2]}"
     )
 
@@ -274,10 +277,13 @@ def _clean_outside_hull(image: Image.Image, bbox: tuple[int, int, int, int]) -> 
     if contours:
         hull = cv2.convexHull(np.concatenate(contours))
         cv2.drawContours(interior_mask, [hull], -1, 255, thickness=-1)
-        dilate_k = max(3, int(min(cw, ch) * 0.005))
+        # Dilate the hull ~2% of the crop's smaller dim — keeps the part's
+        # outermost outline and a small whitespace margin, so the iso never
+        # looks aggressively clipped at the edge.
+        dilate_k = max(7, int(min(cw, ch) * 0.02))
         interior_mask = cv2.dilate(
             interior_mask,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (dilate_k, dilate_k)),
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_k, dilate_k)),
         )
     else:
         interior_mask = component_mask
@@ -291,8 +297,10 @@ def _clean_outside_hull(image: Image.Image, bbox: tuple[int, int, int, int]) -> 
 def _pick_part_blob(stats: np.ndarray, cw: int, ch: int) -> int:
     """Pick the connected-component label that is most likely the part.
 
-    Largest by area, but with a hard filter against ruler-letters-style
-    components (tall + thin and hugging the right edge of the crop).
+    Largest by area, but with hard filters against:
+      - ruler-letter columns (tall+thin hugging an edge)
+      - dimension tables (huge rectangular grids → most of the bbox is ink
+        with a very regular shape; not characteristic of a 3D pictorial)
     Returns the chosen label (1-indexed) or 0 if no plausible blob.
     """
     page_area = float(cw * ch)
@@ -307,12 +315,19 @@ def _pick_part_blob(stats: np.ndarray, cw: int, ch: int) -> int:
         if area / page_area < 0.005:
             continue
         aspect = max(bw, bh) / max(1, min(bw, bh))
-        # Tall, thin column hugging the right edge → page ruler letters.
+        # Tall, thin column hugging an edge → page ruler letters.
         if aspect > 4.0 and bw / cw < 0.20 and (bx + bw) / cw > 0.85:
             continue
-        # Tall thin column hugging the left edge → also rulers.
         if aspect > 4.0 and bw / cw < 0.20 and bx / cw < 0.15:
             continue
+        # Dimension tables: very high ink-density (ratio of component pixels
+        # to bbox area). A 3D pictorial has many thin lines → low density.
+        # A grid table has cells densely filled with text → high density.
+        bbox_area = bw * bh
+        if bbox_area > 0:
+            density = area / float(bbox_area)
+            if density > 0.35 and bbox_area / page_area > 0.15:
+                continue
         if area > best_area:
             best_area = area
             best_label = lbl
@@ -625,11 +640,12 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         return VLMExtractResult(bbox_xyxy=None,
                                 raw_response=description + "\n---\n" + raw)
 
-    # Expand the seed bbox (25%) before tightening — VLMs often clip the bbox
+    # Expand the seed bbox (35%) before tightening — VLMs often clip the bbox
     # to the densest interior of the view, missing the part's outer features.
-    # The tightening step then clips back to the part-shaped blob, so a moderate
-    # over-expansion is safer than under-expanding.
-    pad = 0.25
+    # The tightening step then clips back to the part-shaped blob, so a generous
+    # over-expansion is safer than under-expanding. The union-with-seed defence
+    # at the end ensures we never end up smaller than the model's original pick.
+    pad = 0.35
     fx1, fy1, fx2, fy2 = chosen
     pad_x = int((fx2 - fx1) * pad)
     pad_y = int((fy2 - fy1) * pad)
