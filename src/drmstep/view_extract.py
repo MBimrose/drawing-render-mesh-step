@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 _BBOX_RE = re.compile(r"<box>\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*</box>")
 _MIN_BBOX_AREA_FRAC = 0.05
 _PAD_FRAC = 0.05
+_MAX_EDGE_PX = 1024  # Drop high-res drawings to this max edge before VLM inference
 
 
 @dataclass(frozen=True)
@@ -32,17 +33,18 @@ class ExtractResult:
 
 @lru_cache(maxsize=1)
 def _load_model(model_id: str):
-    """Load LocateAnything-3B once. Returns (model, processor) on cuda."""
+    """Load LocateAnything-3B once. Returns (model, processor, tokenizer) on cuda."""
     import torch
-    from transformers import AutoModel, AutoProcessor
+    from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
     logger.info("loading %s on cuda", model_id)
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModel.from_pretrained(
         model_id, trust_remote_code=True, torch_dtype=torch.bfloat16
     ).to("cuda")
     model.eval()
-    return model, processor
+    return model, processor, tokenizer
 
 
 def _parse_bbox(response: str, width: int, height: int) -> Optional[tuple[int, int, int, int]]:
@@ -90,9 +92,17 @@ def extract_isometric_view(image: Image.Image, config: Config) -> ExtractResult:
     Returns:
         ExtractResult with the cropped (or original) image, the bbox if used, and raw VLM text.
     """
-    model, processor = _load_model(config.locate_anything_model)
-    image = image.convert("RGB")
-    w, h = image.size
+    model, processor, tokenizer = _load_model(config.locate_anything_model)
+    image_full = image.convert("RGB")
+    w_full, h_full = image_full.size
+
+    # Down-scale before VLM inference so the ViT doesn't blow VRAM on big drawings.
+    scale = min(1.0, _MAX_EDGE_PX / max(w_full, h_full))
+    if scale < 1.0:
+        small = image_full.resize((int(w_full * scale), int(h_full * scale)))
+    else:
+        small = image_full
+    w, h = small.size
 
     prompt = (
         "Locate the isometric or 3D perspective view of the part. "
@@ -102,31 +112,40 @@ def extract_isometric_view(image: Image.Image, config: Config) -> ExtractResult:
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
+                {"type": "image", "image": small},
                 {"type": "text", "text": prompt},
             ],
         }
     ]
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = processor(text=[text], images=[image], return_tensors="pt").to("cuda")
+    inputs = processor(text=[text], images=[small], return_tensors="pt").to("cuda")
 
     import torch
 
     with torch.inference_mode():
-        out = model.generate(**inputs, max_new_tokens=256, do_sample=False)
-    response = processor.batch_decode(out, skip_special_tokens=True)[0]
+        # LocateAnything-3B's generate() returns the decoded response directly
+        # (with `<box>` tokens preserved), and requires tokenizer + use_cache=True.
+        response = model.generate(
+            **inputs,
+            tokenizer=tokenizer,
+            max_new_tokens=256,
+            use_cache=True,
+            generation_mode="hybrid",
+        )
 
-    bbox = _parse_bbox(response, w, h)
+    # bbox coords are 0-1000 normalized regardless of small/full image size,
+    # so map directly to the full-res image and crop from it for max quality.
+    bbox = _parse_bbox(response, w_full, h_full)
     if bbox is None:
         logger.info("no bbox parsed; using full image")
-        return ExtractResult(image=image, bbox_xyxy=None, raw_response=response)
+        return ExtractResult(image=image_full, bbox_xyxy=None, raw_response=response)
 
     x1, y1, x2, y2 = bbox
-    area_frac = ((x2 - x1) * (y2 - y1)) / float(w * h)
+    area_frac = ((x2 - x1) * (y2 - y1)) / float(w_full * h_full)
     if area_frac < _MIN_BBOX_AREA_FRAC:
         logger.info("bbox too small (%.3f frac); using full image", area_frac)
-        return ExtractResult(image=image, bbox_xyxy=None, raw_response=response)
+        return ExtractResult(image=image_full, bbox_xyxy=None, raw_response=response)
 
-    padded = _pad_bbox(bbox, w, h)
-    crop = image.crop(padded)
+    padded = _pad_bbox(bbox, w_full, h_full)
+    crop = image_full.crop(padded)
     return ExtractResult(image=crop, bbox_xyxy=padded, raw_response=response)

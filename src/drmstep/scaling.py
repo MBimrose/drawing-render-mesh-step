@@ -109,8 +109,8 @@ def compute_scale(
 
     completion_kwargs = dict(
         model=config.vlm_model,
-        api_base=config.litellm_url,
-        api_key=config.litellm_api_key,
+        api_base=config.vlm_url,
+        api_key=config.vlm_api_key,
         temperature=0.0,
         max_tokens=400,
         messages=[

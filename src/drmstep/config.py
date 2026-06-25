@@ -11,20 +11,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Config(BaseModel):
-    # Service endpoints
+    # Service endpoints. Defaults assume a local OpenAI-compatible vLLM (Qwen3-VL).
+    # Override via DRMSTEP_VLM_URL / DRMSTEP_VLM_KEY / DRMSTEP_VLM_MODEL to point at
+    # Anthropic (https://api.anthropic.com), an Anthropic-compatible litellm proxy,
+    # or another OpenAI-compatible endpoint.
     hunyuan_url: str = Field(
         default_factory=lambda: os.environ.get("DRMSTEP_HUNYUAN_URL", "http://localhost:8081")
     )
-    litellm_url: str = Field(
-        default_factory=lambda: os.environ.get("DRMSTEP_LITELLM_URL", "http://localhost:4000")
+    vlm_url: str = Field(
+        default_factory=lambda: os.environ.get(
+            "DRMSTEP_VLM_URL", "http://wpk-serv-07.mechse.illinois.edu:8002/v1"
+        )
     )
-    litellm_api_key: str = Field(
-        default_factory=lambda: os.environ.get("DRMSTEP_LITELLM_KEY", "sk-anything")
+    vlm_api_key: str = Field(
+        default_factory=lambda: os.environ.get("DRMSTEP_VLM_KEY", "not-needed")
     )
 
-    # Models
+    # Models. Default is the locally-available Qwen3-VL-235B. Set DRMSTEP_VLM_MODEL
+    # to e.g. "anthropic/claude-opus-4-7" + ANTHROPIC_API_KEY to use real Claude.
     vlm_model: str = Field(
-        default_factory=lambda: os.environ.get("DRMSTEP_VLM_MODEL", "claude-opus-4-7")
+        default_factory=lambda: os.environ.get("DRMSTEP_VLM_MODEL", "openai/qwen3-vl-235b")
     )
     locate_anything_model: str = "nvidia/LocateAnything-3B"
 
@@ -45,7 +51,7 @@ class Config(BaseModel):
 
     # CadQuery runner
     cadquery_python: Path = Field(
-        default_factory=lambda: Path(os.environ.get("DRMSTEP_CQ_PYTHON", "")) or _default_cq_python()
+        default_factory=lambda: _resolve_cq_python()
     )
     cadquery_timeout_s: float = 120.0
 
@@ -62,6 +68,13 @@ def _default_cq_python() -> Path:
         return cf
     import sys
     return Path(sys.executable)
+
+
+def _resolve_cq_python() -> Path:
+    env = os.environ.get("DRMSTEP_CQ_PYTHON")
+    if env:
+        return Path(env)
+    return _default_cq_python()
 
 
 def load_config() -> Config:

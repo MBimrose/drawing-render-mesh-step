@@ -19,13 +19,18 @@ dependencies = [
     "httpx>=0.27",
     "litellm>=1.40",
     "transformers>=4.46",
-    "torch>=2.4",
     "accelerate>=0.30",
     "huggingface_hub>=0.24",
-    "cadquery>=2.4",
     "PyYAML>=6.0",
     "rich>=13.7",
 ]
+
+# torch/torchvision and cadquery live in third_party venvs (CADFit + Hunyuan3D-2)
+# so the orchestrator stays light. drmstep installs torch separately so we can
+# pick a CUDA wheel that matches the local GPU (Blackwell needs cu126+).
+# Install torch via:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# Then `pip install -e .` here.
 
 [project.optional-dependencies]
 dev = [

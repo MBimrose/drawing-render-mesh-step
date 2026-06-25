@@ -19,8 +19,8 @@ if [[ ! -x "${HY_VENV}/bin/python" ]]; then
     exit 1
 fi
 
-cd "${HY_DIR}"
-exec "${HY_VENV}/bin/python" api_server.py \
+cd "${REPO_ROOT}"
+exec "${HY_VENV}/bin/python" services/hunyuan_server.py \
     --host 0.0.0.0 --port "${PORT}" \
     --model_path "${MODEL_PATH}" \
     --subfolder "${SUBFOLDER}"
