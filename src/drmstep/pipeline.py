@@ -74,24 +74,31 @@ def run_generation(
     logger.info("[%s] mesh generation", sample)
     mesh_stl = mesh_generate.image_to_mesh(extracted.image, work / "mesh.stl", config)
 
-    # 3. CAD fitting. If CADFit can't fit primitives to the part, we still have a
-    # Hunyuan3D mesh — the benchmark accepts STL as a lower-tier candidate, so
-    # we route there instead of failing the sample.
+    # 3. CAD fitting. If CADFit can't fit primitives to the part, retry once on
+    # a more aggressively simplified mesh (coarser alpha-wrap + largest body
+    # only) — this fixes parts where Hunyuan3D produces multi-body / high-genus
+    # output (e.g. sheet metal). Only if both attempts fail do we route to STL.
     logger.info("[%s] CADFit", sample)
+    cadfit = None
     try:
         cadfit = cad_fit.run_cadfit(mesh_stl, work / "cadfit", config)
     except cad_fit.CadFitError as exc:
-        logger.warning("[%s] CADFit emitted no program (%s); using Hunyuan mesh", sample, exc)
-        # 4'. scaling from the Hunyuan mesh itself (no CADFit recon to compare against).
-        scale = scaling.compute_scale(drawing, task_description, mesh_stl, config)
-        (work / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
-        output_stl = out_dir / "output.stl"
-        _scale_stl_and_save(mesh_stl, output_stl, (scale.sx, scale.sy, scale.sz))
-        return SampleResult(
-            sample=sample, status="hunyuan_only", output_path=output_stl,
-            cadfit_iou=None, scale=(scale.sx, scale.sy, scale.sz),
-            notes=f"cadfit: {exc}",
-        )
+        logger.warning("[%s] CADFit failed (%s); retrying on simplified mesh", sample, exc)
+        try:
+            simplified = mesh_generate.simplify_for_retry(mesh_stl, work / "mesh_simplified.stl")
+            cadfit = cad_fit.run_cadfit(simplified, work / "cadfit_retry", config)
+            logger.info("[%s] CADFit retry succeeded, IoU=%.3f", sample, cadfit.iou)
+        except cad_fit.CadFitError as exc2:
+            logger.warning("[%s] CADFit retry also failed (%s); using Hunyuan mesh", sample, exc2)
+            scale = scaling.compute_scale(drawing, task_description, mesh_stl, config)
+            (work / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
+            output_stl = out_dir / "output.stl"
+            _scale_stl_and_save(mesh_stl, output_stl, (scale.sx, scale.sy, scale.sz))
+            return SampleResult(
+                sample=sample, status="hunyuan_only", output_path=output_stl,
+                cadfit_iou=None, scale=(scale.sx, scale.sy, scale.sz),
+                notes=f"cadfit: {exc2}",
+            )
 
     # 4. scaling
     logger.info("[%s] scaling", sample)

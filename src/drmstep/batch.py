@@ -113,20 +113,35 @@ def _cpu_phase(gpu_result: dict, out_dir: Path, config: Config) -> dict:
     drawing = Image.open(drawing_path).convert("RGB")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 3. CADFit (CPU subprocess)
+    # 3. CADFit (CPU subprocess). On failure, retry once with an aggressive
+    # re-wrap (coarser alpha + largest body only) — this fixes parts where
+    # Hunyuan3D produces multi-body / high-genus meshes (e.g. sheet metal with
+    # many cutouts) that overwhelm CADFit's primitive library.
+    cadfit = None
     t = time.time()
     try:
         cadfit = cad_fit.run_cadfit(mesh_stl, work_dir / "cadfit", config)
         logger.info("[%s] CADFit: %.1fs, IoU=%.3f", sample, time.time() - t, cadfit.iou)
     except cad_fit.CadFitError as exc:
-        logger.warning("[%s] CADFit failed (%s); using Hunyuan mesh", sample, exc)
-        scale = scaling.compute_scale(drawing, task_description, mesh_stl, config)
-        (work_dir / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
-        output_stl = out_dir / "output.stl"
-        _scale_stl_and_save(mesh_stl, output_stl, (scale.sx, scale.sy, scale.sz))
-        return {"sample": sample, "status": "hunyuan_only",
-                "output_path": str(output_stl), "cadfit_iou": None,
-                "scale": (scale.sx, scale.sy, scale.sz), "notes": str(exc)[:200]}
+        logger.warning("[%s] CADFit failed (%s); retrying on simplified mesh", sample, exc)
+        try:
+            simplified = mesh_generate.simplify_for_retry(
+                mesh_stl, work_dir / "mesh_simplified.stl"
+            )
+            t2 = time.time()
+            cadfit = cad_fit.run_cadfit(simplified, work_dir / "cadfit_retry", config)
+            logger.info("[%s] CADFit retry: %.1fs, IoU=%.3f",
+                        sample, time.time() - t2, cadfit.iou)
+        except cad_fit.CadFitError as exc2:
+            logger.warning("[%s] CADFit retry also failed (%s); using Hunyuan mesh",
+                           sample, exc2)
+            scale = scaling.compute_scale(drawing, task_description, mesh_stl, config)
+            (work_dir / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
+            output_stl = out_dir / "output.stl"
+            _scale_stl_and_save(mesh_stl, output_stl, (scale.sx, scale.sy, scale.sz))
+            return {"sample": sample, "status": "hunyuan_only",
+                    "output_path": str(output_stl), "cadfit_iou": None,
+                    "scale": (scale.sx, scale.sy, scale.sz), "notes": str(exc2)[:200]}
 
     # 4. scaling (HTTP VLM)
     t = time.time()

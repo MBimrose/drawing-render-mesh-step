@@ -40,33 +40,73 @@ def _image_to_b64(image: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _manifoldify(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+def _manifoldify(
+    mesh: trimesh.Trimesh,
+    alpha_fraction: float = _ALPHA_WRAP_FRACTION,
+    offset_fraction: float = _OFFSET_FRACTION,
+    keep_largest_body: bool = False,
+) -> trimesh.Trimesh:
     """Run pymeshlab's alpha-wrap to produce a watertight version of ``mesh``.
+
+    ``alpha_fraction`` controls smoothing: smaller → preserves fine detail (but
+    can leave high-genus topology); larger → smoother surface, lower genus,
+    fewer disconnected bodies. Default 0.01 is detail-preserving.
+
+    ``keep_largest_body`` is useful for the simplified-mesh retry path: when
+    Hunyuan3D produces multi-body output (e.g. thin sheet metal), keeping only
+    the largest body removes spurious satellites that confuse CADFit.
 
     Falls back to the input mesh on any pymeshlab failure (e.g. degenerate input).
     """
-    if mesh.is_watertight:
+    if mesh.is_watertight and not keep_largest_body:
         return mesh
     try:
         ms = pymeshlab.MeshSet()
         ms.add_mesh(pymeshlab.Mesh(vertex_matrix=mesh.vertices, face_matrix=mesh.faces))
         ms.generate_alpha_wrap(
-            alpha_fraction=_ALPHA_WRAP_FRACTION,
-            offset_fraction=_OFFSET_FRACTION,
+            alpha_fraction=alpha_fraction,
+            offset_fraction=offset_fraction,
         )
         cm = ms.current_mesh()
         wrapped = trimesh.Trimesh(vertices=cm.vertex_matrix(), faces=cm.face_matrix())
+
+        if keep_largest_body:
+            bodies = wrapped.split(only_watertight=True)
+            if bodies:
+                bodies = sorted(bodies, key=lambda b: b.volume, reverse=True)
+                wrapped = bodies[0]
+
         if not wrapped.is_watertight:
             logger.warning("alpha-wrap output still non-watertight; using raw mesh")
             return mesh
         logger.info(
-            "alpha-wrap: %d → %d faces, watertight, vol=%.4f",
-            len(mesh.faces), len(wrapped.faces), wrapped.volume,
+            "alpha-wrap(α=%.3f%s): %d → %d faces, watertight, vol=%.4f, euler=%d",
+            alpha_fraction, ",largest" if keep_largest_body else "",
+            len(mesh.faces), len(wrapped.faces), wrapped.volume, wrapped.euler_number,
         )
         return wrapped
     except Exception as exc:
         logger.warning("alpha-wrap failed (%s); using raw mesh", exc)
         return mesh
+
+
+def simplify_for_retry(stl_path: Path, out_stl: Path) -> Path:
+    """Re-simplify an existing mesh STL with a more aggressive alpha-wrap.
+
+    Used when CADFit emits no operations on the detail-preserving wrap. Coarser
+    alpha + largest-body-only typically drops genus enough for CADFit's
+    extrude/revolve primitives to find a fit.
+    """
+    raw = trimesh.load(stl_path, force="mesh")
+    aggressive = _manifoldify(
+        raw,
+        alpha_fraction=0.02,     # ~2x coarser
+        offset_fraction=0.005,
+        keep_largest_body=True,
+    )
+    out_stl.parent.mkdir(parents=True, exist_ok=True)
+    aggressive.export(out_stl)
+    return out_stl
 
 
 def image_to_mesh(image: Image.Image, out_stl: Path, config: Config) -> Path:
