@@ -1,3 +1,3 @@
-The drawing shows front, top, right-side orthographic views, a detailed view labeled “VIEW A,” and two isometric pictorials. The largest isometric pictorial is in the upper-right corner, roughly 1/4 the page width, showing the full 3D part with visible mounting flanges and cutouts. A smaller isometric view appears just below it, oriented differently but less prominent.
+The drawing shows front, top, right-side orthographic views, plus a detailed view labeled “VIEW A” and two isometric pictorials. The larger isometric view is in the upper-right corner, roughly 1/4 the page width, showing the full part with visible mounting flanges and cutouts. A smaller isometric is below it, labeled “VIEW A,” showing a rotated perspective. The largest 3D pictorial is the upper-right one.
 ---
-{"bbox": [840, 10, 1000, 220]}
+{"bbox": [840, 0, 1000, 220]}

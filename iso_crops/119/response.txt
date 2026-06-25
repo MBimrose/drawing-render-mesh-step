@@ -1,3 +1,3 @@
-The drawing includes orthographic views (top, front, side), sections A-A, B-B, C-C, D-D, F-F, and detail E. The primary isometric pictorial view of the whole part is located in the upper-right corner, roughly 1/4 the page width and height. A smaller isometric view appears below it, but the upper-right one is the largest 3D rendering of the full part.
+The drawing includes orthographic views (top, front, side), sections A-A, B-B, C-C, D-D, F-F, and detail E. The largest isometric pictorial view of the whole part is located in the upper-right corner, occupying roughly 1/6 of the page area. It is a shaded 3D rendering showing the full assembly with internal features visible. No other full-part isometric views are present.
 ---
 {"bbox": [878, 10, 1000, 220]}

@@ -1,3 +1,3 @@
-The drawing includes an orthographic front view, a detail view showing bends, and two isometric pictorials. The largest isometric pictorial is located in the upper-right quadrant, roughly 1/4 of the page width and 1/3 height. A second, smaller isometric view appears below it, slightly left of center. Both are shaded 3D renderings of the entire part.
+The drawing includes an isometric pictorial view in the upper-right and another in the lower-right; the upper-right one is larger and shows the full part. There is also a 2D orthographic view with dimensions in the center-left, and a detail view of bends above it. The largest 3D pictorial is the upper-right view, occupying roughly the top-right quadrant of the page. No section or detail views beyond the labeled bend callouts are present.
 ---
-{"bbox": [758, 47, 958, 333]}
+{"bbox": [750, 47, 950, 350]}

@@ -1,3 +1,3 @@
-The drawing includes an isometric pictorial (upper-right), a top view (upper-left), a detailed view labeled “DETAIL A” (lower-left), and a partial side/profile view (lower-right). The isometric view is the largest 3D rendering of the whole part, located in the upper-right quadrant, occupying roughly 1/4 of the page. No other full-part 3D pictorials are present.
+The drawing includes an isometric pictorial view (shaded 3D rendering) located in the upper-right quadrant, roughly 1/4 of the page width and height. It is the only full-part 3D pictorial shown. Other views include a top view with section lines (upper-left), a detailed view labeled “DETAIL A” (lower-left), and a partial side/profile view (lower-right). No section views (e.g., A-A) or orthographic front/side views are explicitly labeled.
 ---
-{"bbox": [598, 87, 960, 595]}
+{"bbox": [598, 87, 958, 585]}

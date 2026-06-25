@@ -1,3 +1,3 @@
-The drawing includes front, top, right-side orthographic views, section A-A, section C-C, detail B, and an isometric pictorial. The isometric view is located in the upper-right corner, occupying roughly 1/6 of the page area. It is the only 3D pictorial of the whole part and is the largest such view present.
+The drawing includes: front, top, right-side orthographic views; Section A-A, Section C-C, Detail B; and an isometric pictorial. The isometric view is located in the upper-right corner, occupying roughly 1/6 of the page area. It is the only 3D pictorial of the whole part and is the largest such view present.
 ---
-{"bbox": [784, 10, 999, 350]}
+{"bbox": [784, 30, 999, 330]}

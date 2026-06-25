@@ -1,3 +1,3 @@
-The drawing shows an orthographic front view (bottom-left), a top view (center), and an isometric pictorial view (upper-right). The isometric view is the largest 3D rendering of the whole part, occupying the upper-right quadrant, roughly 1/4 of the page. No other 3D pictorial views of the full part are present.
+The drawing shows an isometric pictorial view of the part in the upper-right quadrant, occupying roughly 25% of the page area. It is the only 3D rendering of the full part; no other isometric, section, or detail views are present. The orthographic views (top, front, side) are shown in the center and lower-left. The isometric view is the largest single 3D representation of the whole part.
 ---
-{"bbox": [750, 27, 999, 520]}
+{"bbox": [758, 27, 999, 520]}

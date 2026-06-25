@@ -1,3 +1,3 @@
-The drawing shows: Front Side View, Back Side View, Section A-A, Section B-B, Section C-C, Section D-D, and two isometric pictorials (one near upper-right, one near lower-left). The largest isometric pictorial is in the upper-right quadrant, roughly 1/4 the page width and 1/3 height. It depicts the full part in 3D with visible shading/lines. No other full-part 3D views are larger.
+The drawing includes Front Side View, Back Side View, Section A-A, Section B-B, Section C-C, and Section D-D. There is no true isometric pictorial view — all views are orthographic or sectional. The closest to a 3D representation is the front and back side views, which are 2D projections, not shaded 3D renderings. No shaded/lined 3D rendering of the whole part exists on the page.
 ---
-{"bbox": [800, 297, 999, 650]}
+{"bbox": [0, 0, 1, 1]}

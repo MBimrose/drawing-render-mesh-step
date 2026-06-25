@@ -1,3 +1,3 @@
-The drawing includes an isometric pictorial view (shaded 3D rendering) located in the upper-right quadrant, roughly 1/4 the page width and 1/3 the height. No other full-part 3D pictorials are present; all other views are orthographic projections (top, front, side, and detail views). The isometric view is the largest single 3D representation of the whole part.
+The drawing includes an isometric pictorial view located in the upper-right quadrant of the page. It is the largest and only 3D rendering of the entire part, showing its folded sheet metal form with cutouts and bends. No other isometric or 3D pictorial views of the whole part are present. The orthographic views (top, front, side) and dimension tables are separate and not considered pictorial.
 ---
-{"bbox": [730, 100, 999, 450]}
+{"bbox": [730, 105, 999, 450]}

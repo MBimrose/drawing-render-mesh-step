@@ -1,3 +1,3 @@
-The drawing includes front, top, side, section B-B, and detail views (C, E, F), plus an isometric pictorial. The isometric view is located in the upper-right corner, roughly 1/4 the page width, and is the only 3D pictorial of the whole part. It is shaded with visible edges and shows overall form, including mounting flanges and central cavity. No other full-part 3D views are present.
+The distinct views include: front, top, right side, section B-B, detail C, detail E, detail F, and an isometric pictorial. The isometric pictorial is located in the upper-right corner, occupying roughly 1/6 of the page area. It is the only 3D rendering of the whole part and is the largest single pictorial view present.
 ---
-{"bbox": [798, 10, 1000, 300]}
+{"bbox": [798, 10, 999, 300]}
