@@ -22,6 +22,6 @@ def test_parse_json_embedded_in_prose():
 
 
 def test_fallback_uniform():
-    res = scaling._fallback_uniform(target_max=100.0, candidate_dims=(2.0, 1.0, 0.5))
+    res = scaling._fallback_uniform(target_max=100.0, candidate_max=2.0)
     assert abs(res.sx - 50.0) < 1e-6
     assert res.sx == res.sy == res.sz

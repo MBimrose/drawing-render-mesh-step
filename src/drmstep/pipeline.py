@@ -12,7 +12,7 @@ import trimesh
 import yaml
 from PIL import Image
 
-from . import cad_fit, mesh_generate, runners, scaling, view_extract
+from . import cad_fit, cad_simplify, mesh_generate, runners, scaling, view_extract
 from .config import Config
 
 logger = logging.getLogger(__name__)
@@ -98,11 +98,20 @@ def run_generation(
     scale = scaling.compute_scale(drawing, task_description, cadfit.recon_stl, config)
     (work / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
 
-    # 5. execute -> output.step (fallback to scaled recon STL on cq exec error)
+    # 5. simplify CADFit's loops so the extruded BREP is tessellation-friendly
+    # (CADFit's per-loop polylines are 300+ tiny segments; without DP simplification
+    # the OCC tessellator takes 10+ minutes per part). Then execute -> output.step.
+    simplified_code, simp_stats = cad_simplify.simplify_cadfit_code(cadfit.cadquery_code)
+    logger.info(
+        "[%s] cad_simplify: %d loops, %d → %d segments",
+        sample, simp_stats["loops"], simp_stats["segments_before"], simp_stats["segments_after"],
+    )
+    (work / "cadfit_simplified.py").write_text(simplified_code)
+
     output_step = out_dir / "output.step"
     try:
         runners.execute_cadquery(
-            cadfit.cadquery_code, output_step,
+            simplified_code, output_step,
             (scale.sx, scale.sy, scale.sz), config, work,
         )
         return SampleResult(

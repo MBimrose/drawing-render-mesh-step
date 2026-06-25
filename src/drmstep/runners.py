@@ -11,7 +11,7 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 _POSTLUDE_TEMPLATE = """
-# --- drmstep postlude: scale + export STEP ---
+# --- drmstep postlude: uniform-scale + export STEP ---
 import cadquery as _cq
 import sys as _sys
 
@@ -39,42 +39,72 @@ for _pn in _preferred:
 if _picked is None:
     _picked = _candidates[-1][1]
 
-# Coerce to a cq.Shape.
-if isinstance(_picked, _cq.Assembly):
-    _shape = _picked.toCompound()
-elif isinstance(_picked, _cq.Workplane):
-    _shape = _picked.val()
-else:
-    _shape = _picked
-if not isinstance(_shape, _cq.Shape):
-    _shape = _cq.Shape(_shape.wrapped) if hasattr(_shape, 'wrapped') else _shape
+# Coerce to a list of cq.Shape solids so we can boolean-union them.
+# CADFit emits `result = solid_1.add(solid_2).add(solid_3)`, which collects
+# overlapping solids in a Workplane WITHOUT fusing them. The resulting BREP has
+# coincident/intersecting faces that turn OCC's tessellator into a black hole.
+# So we explicitly fuse here.
+def _collect_solids(_obj):
+    if isinstance(_obj, _cq.Workplane):
+        _items = [v for v in _obj.vals() if isinstance(v, _cq.Shape)]
+        return [s for v in _items for s in (v.Solids() if hasattr(v, 'Solids') else [v])]
+    if isinstance(_obj, _cq.Assembly):
+        return _obj.toCompound().Solids()
+    if isinstance(_obj, _cq.Shape):
+        solids = _obj.Solids() if hasattr(_obj, 'Solids') else []
+        return solids if solids else [_obj]
+    if hasattr(_obj, 'wrapped'):
+        return [_cq.Shape(_obj.wrapped)]
+    return []
 
-_sx, _sy, _sz = {sx}, {sy}, {sz}
+_solids = _collect_solids(_picked)
+if not _solids:
+    print("drmstep: result yielded no solids", file=_sys.stderr)
+    _sys.exit(2)
 
-_scaled = _shape
-if abs(_sx - 1.0) > 1e-9 or abs(_sy - 1.0) > 1e-9 or abs(_sz - 1.0) > 1e-9:
+_shape = _solids[0]
+for _s2 in _solids[1:]:
     try:
-        if abs(_sx - _sy) < 1e-9 and abs(_sy - _sz) < 1e-9:
-            # Uniform: cq.Shape.scale exists and is robust.
-            _scaled = _shape.scale(_sx) if hasattr(_shape, 'scale') else _shape
-        else:
-            # Non-uniform: apply gp_GTrsf via BRepBuilderAPI_GTransform.
-            from OCP.gp import gp_GTrsf, gp_Mat, gp_XYZ
-            from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
-            _mat = gp_Mat(_sx, 0, 0, 0, _sy, 0, 0, 0, _sz)
-            _trsf = gp_GTrsf()
-            _trsf.SetVectorialPart(_mat)
-            _trsf.SetTranslationPart(gp_XYZ(0, 0, 0))
-            _builder = BRepBuilderAPI_GTransform(_shape.wrapped, _trsf, True)
-            _builder.Build()
-            if _builder.IsDone():
-                _scaled = _cq.Shape(_builder.Shape())
-            else:
-                print("drmstep: GTransform did not complete; exporting unscaled", file=_sys.stderr)
+        _shape = _shape.fuse(_s2)
     except Exception as _exc:
-        print(f"drmstep: scale failed ({{_exc}}); exporting unscaled", file=_sys.stderr)
+        print(f"drmstep: fuse failed ({{_exc}}); appending without union", file=_sys.stderr)
+        _shape = _cq.Compound.makeCompound([_shape, _s2])
 
-_cq.exporters.export(_scaled, "{output_step}")
+# Simplify the BREP. CADFit's emitted code traces each sketch loop with hundreds
+# of tiny lineTo + threePointArc segments — after extrusion that's hundreds of
+# near-tangent side faces, which torch OCC's tessellator (10+ minutes per part).
+# ShapeUpgrade_UnifySameDomain merges G1-continuous adjacent faces, dropping the
+# face count by ~10x without changing the shape.
+try:
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+    _unify = ShapeUpgrade_UnifySameDomain(
+        _shape.wrapped,
+        True,   # UnifyEdges
+        True,   # UnifyFaces
+        True,   # ConcatBSplines
+    )
+    _unify.SetLinearTolerance(1e-4)
+    _unify.SetAngularTolerance(1e-3)
+    _unify.Build()
+    _unified = _unify.Shape()
+    if _unified is not None:
+        _shape = _cq.Shape(_unified)
+        print("drmstep: ShapeUpgrade_UnifySameDomain applied")
+except Exception as _exc:
+    print(f"drmstep: UnifySameDomain skipped ({{_exc}})", file=_sys.stderr)
+
+# Uniform scale via gp_Trsf — preserves aspect ratio and produces a clean BREP
+# the evaluator can tessellate (non-uniform gp_GTrsf warps shapes in ways that
+# frequently trip the tessellation timeout).
+_s = float({s})
+if abs(_s - 1.0) > 1e-9:
+    try:
+        _shape = _shape.scale(_s)
+    except Exception as _exc:
+        print(f"drmstep: uniform scale failed ({{_exc}}); exporting unscaled",
+              file=_sys.stderr)
+
+_cq.exporters.export(_shape, "{output_step}")
 print("drmstep: wrote {output_step}")
 """
 
@@ -90,14 +120,20 @@ def execute_cadquery(
     config: Config,
     work_dir: Path,
 ) -> Path:
-    """Append a scale + STEP-export postlude to ``code`` and execute in a subprocess.
+    """Append a uniform-scale + STEP-export postlude to ``code`` and run it.
 
-    Returns the produced STEP path. Raises RunnerError on failure.
+    ``scale`` is a 3-tuple for backwards compatibility, but only ``sx`` is used —
+    the postlude applies a single uniform scale via ``cq.Shape.scale``. Returns
+    the produced STEP path. Raises RunnerError on failure.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     sx, sy, sz = scale
+    # If the caller passed a non-uniform tuple, collapse to the largest factor
+    # (we no longer emit non-uniform scales, but legacy callers might).
+    s = max(abs(sx), abs(sy), abs(sz)) if abs(sx) > 0 else 1.0
+    output_step = output_step.resolve()
     augmented = code + _POSTLUDE_TEMPLATE.format(
-        sx=sx, sy=sy, sz=sz, output_step=str(output_step).replace("\\", "\\\\")
+        s=s, output_step=str(output_step).replace("\\", "\\\\")
     )
     script = work_dir / "_drmstep_run.py"
     script.write_text(augmented)

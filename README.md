@@ -62,6 +62,13 @@ drmstep score --submission runs/submission
 bash scripts/package_submission.sh runs/submission submission.zip
 ```
 
+### Knobs
+
+- `CADGENBENCH_MESH_TIMEOUT_S` — bump the evaluator's per-mesh tessellation budget (default 180s). Complex CADFit outputs may need 600–900s.
+- `DRMSTEP_VIEW_BACKEND` — `classical` (default, deterministic OpenCV) / `locate_anything` / `qwen`.
+- `DRMSTEP_VLM_URL`, `DRMSTEP_VLM_KEY`, `DRMSTEP_VLM_MODEL` — point the scaling step at a different VLM endpoint.
+- `DRMSTEP_HUNYUAN_URL` — point at a remote Hunyuan3D-2 service instead of the local one.
+
 ## Components
 
 | Step | Module | Backend |

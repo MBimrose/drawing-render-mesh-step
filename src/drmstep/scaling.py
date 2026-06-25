@@ -31,22 +31,22 @@ class ScaleResult:
     raw_response: str
 
 
-SYSTEM_PROMPT = """You read mechanical engineering drawings and emit scale factors.
+SYSTEM_PROMPT = """You read mechanical engineering drawings and emit a single uniform scale factor.
 
 You will be given (a) an annotated engineering drawing with orthographic and isometric views,
-(b) the task description text, and (c) the current bounding-box dimensions of a candidate mesh
-(in arbitrary units, normalized roughly to unit cube). Your job: determine the target real-world
-dimensions implied by the drawing, and emit per-axis multiplicative scale factors so that
+(b) the task description text, and (c) the current LARGEST bounding-box edge length of a
+candidate mesh (in arbitrary units, normalized roughly to a unit cube). Your job: identify
+the largest real-world dimension implied by the drawing, then emit a single multiplicative
+scale factor ``s`` such that
 
-    candidate_bbox * (sx, sy, sz) ~= target real-world bbox
+    s * max(candidate_dims) ~= max(target_real_world_dims_in_mm)
 
 Notes:
-- Use the dimensions printed in the drawing if available. Otherwise infer from the task description.
-- If you cannot reliably tell which mesh axis aligns to which drawing axis, return uniform scale
-  (sx = sy = sz = uniform_factor) where uniform_factor maps max(candidate_dims) -> max(target_dims).
-- Return ONLY a single JSON object, no prose, in this exact schema:
-  {"sx": <float>, "sy": <float>, "sz": <float>, "unit": "mm", "rationale": "<one short line>"}
-- Default unit is "mm" unless the drawing clearly uses another (e.g. inches).
+- Read the largest printed dimension on the drawing (typically a Ø value or an overall
+  length annotation). Express it in mm.
+- Return ONLY a single JSON object, no prose, no markdown, in this exact schema:
+    {"scale": <float>, "unit": "mm", "rationale": "<one short line>"}
+- Default unit is "mm" unless the drawing clearly uses another.
 """
 
 
@@ -61,6 +61,10 @@ def _recon_dims(recon_stl: Path) -> tuple[float, float, float]:
     mesh = trimesh.load(recon_stl, force="mesh")
     extents = mesh.bounding_box.extents
     return float(extents[0]), float(extents[1]), float(extents[2])
+
+
+def _recon_max_dim(recon_stl: Path) -> float:
+    return max(_recon_dims(recon_stl))
 
 
 def _parse_json(text: str) -> dict | None:
@@ -82,8 +86,8 @@ def _parse_json(text: str) -> dict | None:
         return None
 
 
-def _fallback_uniform(target_max: float, candidate_dims: tuple[float, float, float]) -> ScaleResult:
-    s = target_max / max(candidate_dims) if max(candidate_dims) > 0 else 1.0
+def _fallback_uniform(target_max: float, candidate_max: float) -> ScaleResult:
+    s = target_max / candidate_max if candidate_max > 0 else 1.0
     return ScaleResult(
         sx=s, sy=s, sz=s, unit="mm",
         rationale=f"fallback uniform scale {s:.4f}", raw_response=""
@@ -98,13 +102,17 @@ def compute_scale(
     *,
     target_max_fallback: float = 50.0,
 ) -> ScaleResult:
-    """Ask Claude for per-axis scale factors mapping CADFit recon to drawing dims."""
-    cx, cy, cz = _recon_dims(recon_stl)
+    """Ask the VLM for a single uniform scale factor mapping CADFit recon to drawing dims.
+
+    Uniform scaling preserves the recon's aspect ratio (which Hunyuan3D-2 + CADFit
+    already got mostly right) and produces clean BREP geometry — non-uniform
+    ``gp_GTrsf`` warps shapes in ways that defeat the evaluator's tessellator.
+    """
+    cmax = _recon_max_dim(recon_stl)
     user_text = (
         f"Task description:\n{task_description}\n\n"
-        f"Current candidate bounding-box (unscaled, CADFit recon):\n"
-        f"  X = {cx:.4f}\n  Y = {cy:.4f}\n  Z = {cz:.4f}\n\n"
-        "Emit the JSON object now."
+        f"Current candidate's largest bounding-box edge (unscaled):\n  max_dim = {cmax:.4f}\n\n"
+        "Reply with the JSON object now."
     )
 
     completion_kwargs = dict(
@@ -135,29 +143,40 @@ def compute_scale(
             break
         raw = resp.choices[0].message.content or ""
         parsed = _parse_json(raw)
-        if parsed and all(k in parsed for k in ("sx", "sy", "sz")):
+        if parsed and "scale" in parsed:
             break
         completion_kwargs["messages"].append({"role": "assistant", "content": raw})
         completion_kwargs["messages"].append({
             "role": "user",
             "content": "Your previous response did not parse as the required JSON schema. "
-                       "Reply with ONLY the JSON object: "
-                       '{"sx": <float>, "sy": <float>, "sz": <float>, "unit": "mm", "rationale": "..."}'
+                       'Reply with ONLY: {"scale": <float>, "unit": "mm", "rationale": "..."}'
         })
 
-    if not parsed or not all(k in parsed for k in ("sx", "sy", "sz")):
-        logger.warning("scaling: could not parse JSON from Claude; falling back uniform")
-        return _fallback_uniform(target_max_fallback, (cx, cy, cz))
+    if not parsed or "scale" not in parsed:
+        logger.warning("scaling: could not parse JSON; using uniform fallback")
+        return _fallback_uniform(target_max_fallback, cmax)
 
     try:
-        return ScaleResult(
-            sx=float(parsed["sx"]),
-            sy=float(parsed["sy"]),
-            sz=float(parsed["sz"]),
-            unit=str(parsed.get("unit", "mm")),
-            rationale=str(parsed.get("rationale", ""))[:200],
-            raw_response=raw,
-        )
+        s = float(parsed["scale"])
     except (TypeError, ValueError) as exc:
-        logger.warning("scaling: bad floats in parsed JSON: %s", exc)
-        return _fallback_uniform(target_max_fallback, (cx, cy, cz))
+        logger.warning("scaling: bad float in parsed JSON: %s", exc)
+        return _fallback_uniform(target_max_fallback, cmax)
+
+    # The VLM emits the *target real-world max dim*. Convert to a multiplicative factor
+    # by dividing by the candidate's current max dim. (Both VLMs and Claude tend to put
+    # the millimeter value here, not the multiplicative factor.) Heuristic: if the value
+    # is between 0.1 and 20 and the candidate_max is also ~1, treat it as a pure ratio.
+    if cmax > 0 and (s < 0.2 or s > 50):
+        # value looks like a target dim in mm — convert
+        factor = s / cmax
+    else:
+        # value already looks like a unit-scale ratio
+        factor = s
+
+    return ScaleResult(
+        sx=factor, sy=factor, sz=factor,
+        unit=str(parsed.get("unit", "mm")),
+        rationale=f"requested target_max={s:.2f}, candidate_max={cmax:.4f} → s={factor:.4f}; "
+                  + str(parsed.get("rationale", ""))[:120],
+        raw_response=raw,
+    )
