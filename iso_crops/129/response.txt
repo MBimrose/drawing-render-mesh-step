@@ -1,0 +1,3 @@
+The drawing shows an isometric pictorial view, a top view, and a front view (with bend callouts). The isometric pictorial is located in the upper-right quadrant of the page, roughly spanning from grid columns 9–12 and rows A–C. It is the largest single 3D rendering of the whole part and is shaded/lined to show depth and form. No other full-part 3D pictorials are present.
+---
+{"bbox": [740, 137, 920, 507]}

@@ -1,0 +1,3 @@
+The drawing includes multiple orthographic views (top, front, side) and two isometric pictorial views. The largest isometric view of the whole part is located in the upper-right quadrant, roughly spanning from grid lines B–D vertically and columns 8–11 horizontally. A second, smaller isometric view appears below it, near grid lines D–F and columns 8–10. Both are shaded 3D renderings, not orthographic projections.
+---
+{"bbox": [758, 207, 980, 457]}

@@ -1,0 +1,3 @@
+The drawing includes orthographic views (top, front, side), section views (A-A, C-C, B-B), and two isometric pictorials. The largest isometric pictorial of the whole part is located in the upper-right quadrant (grid area B9–C11), roughly 1/4 the page width and height. A second, smaller isometric view appears below it in the lower-right (D9–E11). Only the upper-right one shows the full part in 3D.
+---
+{"bbox": [803, 207, 930, 425]}

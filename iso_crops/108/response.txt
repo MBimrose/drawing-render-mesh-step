@@ -1,0 +1,3 @@
+The drawing shows one isometric pictorial view of the entire part, located in the upper-right quadrant (grid cells 8–11, rows A–C). It is approximately 4 grid columns wide and 3 rows tall, making it the largest and only 3D pictorial view present. No orthographic projections, sections, or detail views are shown — only the isometric and dimensioned flat layout.
+---
+{"bbox": [778, 207, 935, 430]}

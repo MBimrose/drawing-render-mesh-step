@@ -1,0 +1,3 @@
+The drawing includes top, front, side, section A-A, and two isometric pictorial views. The largest isometric pictorial is located in the upper-right quadrant, roughly spanning columns 8–11 and rows C–E. It’s a shaded 3D rendering showing the full part with bolt holes and flange features. A second, smaller isometric view appears just below it, slightly to the left.
+---
+{"bbox": [707, 355, 907, 575]}

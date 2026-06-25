@@ -1,0 +1,3 @@
+The drawing includes: top view, front view, side view, section A-A, section C-C, detail B, detail D, and one isometric pictorial. The isometric view is located in the upper-right quadrant, roughly spanning grid columns 8–12 and rows A–C. It is the largest single 3D rendering of the whole part, showing its octagonal outer shape and internal features. No other full-part 3D pictorials are present.
+---
+{"bbox": [800, 187, 960, 475]}

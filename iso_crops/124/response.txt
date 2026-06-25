@@ -1,0 +1,3 @@
+The drawing includes an isometric pictorial (upper-right), front view (center-right), top view (upper-center), section views E-E and F-F (left), detail views D and G (center-right), and section H-H with detail G (lower-left). The largest 3D pictorial is the isometric view in the upper-right, roughly 3x2 grid squares in size. No other full-part 3D views are present.
+---
+{"bbox": [778, 124, 927, 407]}

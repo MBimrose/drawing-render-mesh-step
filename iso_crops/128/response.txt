@@ -1,0 +1,3 @@
+The drawing shows a front view, a top view, a right-side sectional view, and two isometric pictorials. The largest isometric pictorial is in the upper-right quadrant, roughly 2.5 inches wide by 2 inches tall. It depicts the full 3D form with shading and hidden lines, oriented to show both the flange and central hub. A second, smaller isometric view appears just below it, showing the part from a slightly different angle.
+---
+{"bbox": [700, 137, 930, 337]}

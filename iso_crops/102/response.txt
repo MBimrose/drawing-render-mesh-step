@@ -1,0 +1,3 @@
+The drawing includes a top view, front view, section A-A, detail B, and an isometric pictorial. The isometric view is located in the upper-right quadrant of the sheet. It is approximately 3–4 inches wide and tall, making it the largest single 3D pictorial of the whole part. No other full-part 3D views are present.
+---
+{"bbox": [778, 124, 947, 437]}

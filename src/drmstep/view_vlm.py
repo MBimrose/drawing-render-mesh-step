@@ -131,6 +131,20 @@ def _build_locate_prompt(w: int, h: int, description: str) -> str:
     )
 
 
+def _build_fallback_prompt(w: int, h: int, description: str) -> str:
+    """Used when no isometric exists — locate the most informative orthographic view."""
+    return (
+        f"The image is {w} pixels wide by {h} pixels tall.\n\n"
+        f"Earlier description of the drawing's views:\n{description}\n\n"
+        "No isometric pictorial view of the whole part is available. Instead, return the "
+        "TIGHT bounding box of the SINGLE most informative orthographic view — the one that "
+        "shows the part's overall shape most clearly. Prefer the front or side view over "
+        "top views, and prefer a full view over a section/detail view. The bbox must crop "
+        "ONLY that single view, excluding dimension callouts, other views, and the title block. "
+        "Reply with ONLY the JSON object: {\"bbox\": [x1, y1, x2, y2]}"
+    )
+
+
 def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResult:
     """Two-pass VLM extraction: describe views, then locate isometric bbox.
 
@@ -168,32 +182,50 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
     except Exception as exc:
         logger.warning("VLM describe failed: %s", exc)
 
-    # Pass 2: locate
-    raw = ""
-    bbox_small: Optional[tuple[int, int, int, int]] = None
-    try:
-        resp = litellm.completion(
-            model=config.vlm_model,
-            api_base=config.vlm_url,
-            api_key=config.vlm_api_key,
-            temperature=0.0,
-            max_tokens=150,
-            messages=[
-                {"role": "system", "content": _SYSTEM_LOCATE},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": img_url}},
-                        {"type": "text", "text": _build_locate_prompt(w_small, h_small, description)},
-                    ],
-                },
-            ],
-        )
-        raw = (resp.choices[0].message.content or "").strip()
-        bbox_small = _parse_bbox(raw)
-        logger.info("VLM locate response: %s", raw[:200])
-    except Exception as exc:
-        logger.warning("VLM locate failed: %s", exc)
+    def _locate(prompt_builder, label: str) -> tuple[Optional[tuple[int, int, int, int]], str]:
+        try:
+            resp = litellm.completion(
+                model=config.vlm_model,
+                api_base=config.vlm_url,
+                api_key=config.vlm_api_key,
+                temperature=0.0,
+                max_tokens=150,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_LOCATE},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": img_url}},
+                            {"type": "text", "text": prompt_builder(w_small, h_small, description)},
+                        ],
+                    },
+                ],
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            logger.info("VLM %s response: %s", label, text[:200])
+            return _parse_bbox(text), text
+        except Exception as exc:
+            logger.warning("VLM %s failed: %s", label, exc)
+            return None, ""
+
+    # Pass 2a: locate the isometric pictorial.
+    bbox_small, raw = _locate(_build_locate_prompt, "locate-iso")
+
+    # Pass 2b: if the model returned no bbox (or a degenerate one), the drawing
+    # may not contain an isometric at all. Ask for the best orthographic view
+    # so we still have geometry to feed Hunyuan3D.
+    def _is_degenerate(b: Optional[tuple[int, int, int, int]]) -> bool:
+        if b is None:
+            return True
+        x1, y1, x2, y2 = b
+        return x2 <= x1 or y2 <= y1
+
+    if _is_degenerate(bbox_small):
+        logger.info("VLM found no isometric; falling back to best orthographic view")
+        bbox_small_fb, raw_fb = _locate(_build_fallback_prompt, "locate-ortho-fallback")
+        raw = raw + "\n--- fallback ---\n" + raw_fb
+        if not _is_degenerate(bbox_small_fb):
+            bbox_small = bbox_small_fb
 
     if bbox_small is None:
         return VLMExtractResult(bbox_xyxy=None, raw_response=description + "\n---\n" + raw)

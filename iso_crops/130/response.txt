@@ -1,0 +1,3 @@
+The drawing shows front, top, right-side orthographic views, a detailed view labeled “VIEW A,” and two isometric pictorials in the upper-right quadrant. The largest isometric view (of the whole part) is located in the upper-right, roughly spanning grid columns 9–12 and rows A–C. It is shaded/lined and oriented to show the part’s 3D form with mounting flanges and internal structure. No section views or detail callouts beyond “VIEW A” are present.
+---
+{"bbox": [798, 107, 935, 300]}

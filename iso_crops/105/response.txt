@@ -1,0 +1,3 @@
+The drawing shows: Top view, Section A-A, Detail C (x4), and two isometric pictorials. The largest isometric pictorial is in the upper-right quadrant, occupying roughly 20% of the page area. It’s a shaded 3D rendering showing the full part with internal cutaway. A second, smaller isometric view is directly below it.
+---
+{"bbox": [697, 145, 900, 400]}

@@ -1,0 +1,3 @@
+The drawing includes orthographic views (front, top, side), section views (A-A, C-C), detail B, and one isometric pictorial. The isometric view is located in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is the largest 3D rendering of the whole part and shows the component in a shaded, perspective view for visual reference.
+---
+{"bbox": [788, 134, 936, 378]}
