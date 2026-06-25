@@ -1,3 +1,3 @@
-The drawing includes orthographic views (e.g., View A, View B, View D, View E), sections (Section G-G), and details (Detail I, Detail H, Detail L). The largest isometric pictorial view of the whole part is located in the upper-right quadrant (grid area 9–11, B–C), approximately 3–4 inches wide and 2–3 inches tall. A second, smaller isometric view appears just below it.
+The drawing includes orthographic views (e.g., View A, View B, View D, View E), sections (Section G-G), and multiple detail views (Detail I, Detail J, Detail K, Detail L). The largest isometric pictorial view of the whole part is located in the upper-right quadrant (grid area H9–J11), approximately 3–4 inches wide and 2–3 inches tall. It is shaded with hidden lines and shows the full 3D form of the bracket-like part. No other full-part isometric views are larger.
 ---
-{"bbox": [1100, 105, 1360, 330]}
+{"bbox": [1178, 105, 1420, 347]}

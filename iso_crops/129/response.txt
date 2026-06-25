@@ -1,3 +1,3 @@
 The drawing shows an isometric pictorial view in the upper-right quadrant, roughly occupying the area from grid lines 8–12 (horizontal) and A–C (vertical). It is the only 3D pictorial of the whole part and is approximately 4 grid columns wide by 3 rows tall. No other isometric or 3D views of the full part are present.
 ---
-{"bbox": [738, 120, 936, 508]}
+{"bbox": [740, 120, 930, 500]}

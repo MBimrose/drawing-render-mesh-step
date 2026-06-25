@@ -1,5 +1,5 @@
-The drawing shows orthographic views: Front Side View, Back Side View, and Sections A-A, B-B, C-C, D-D. There is no true isometric pictorial view — all representations are 2D orthographic or sectional. The shaded 3D-like renderings (e.g., near Section A-A) are not full isometric pictorials but stylized 2D representations. No single 3D pictorial of the whole part exists.
+The drawing includes Front Side View, Back Side View, and sections A-A, B-B, C-C, D-D. There is no true isometric pictorial view — all views are orthographic or sectional. The shaded 3D-like renderings (e.g., near section A-A) are not full isometric pictorials but stylized representations of specific features. No single 3D pictorial of the whole part exists.
 ---
 {"bbox": [0, 0, 0, 0]}
 --- fallback ---
-{"bbox": [550, 300, 780, 600]}
+{"bbox": [577, 308, 800, 604]}

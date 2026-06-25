@@ -1,3 +1,3 @@
-The drawing includes multiple orthographic views (top, front, side) and two isometric pictorial views. The largest isometric view is located in the upper-right quadrant, occupying roughly 1/4 of the page. A second, smaller isometric view is directly below it, also in the right half. Neither is a section or detail — both show the full 3D part.
+The drawing includes multiple orthographic views (top, front, side) and two isometric pictorial views. The largest isometric view of the whole part is located in the upper-right quadrant, roughly spanning from grid lines B–D vertically and columns 8–11 horizontally. It is a shaded 3D rendering showing the assembled bent sheet metal part with cutouts and bends. A second, smaller isometric view appears below it, near grid lines D–F.
 ---
-{"bbox": [730, 207, 960, 457]}
+{"bbox": [730, 207, 958, 467]}

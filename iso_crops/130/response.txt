@@ -1,3 +1,3 @@
-The drawing shows front, top, right-side orthographic views, a detailed view labeled “VIEW A,” and two isometric pictorials. The largest isometric pictorial is in the upper-right quadrant, roughly 1/4 the page width and height. It’s a shaded 3D rendering showing the full part with visible mounting holes and contours. A smaller isometric view appears just below it, but the upper-right one is the primary 3D representation.
+The drawing shows front, top, right-side orthographic views, a detailed view labeled “VIEW A,” and two isometric pictorials. The largest isometric pictorial is in the upper-right quadrant, roughly 1/4 the page width and 1/3 the page height. It’s a shaded 3D rendering showing the full part with visible mounting holes and structural bends. A smaller isometric view appears below it, but the upper-right one is the primary 3D representation.
 ---
 {"bbox": [784, 107, 940, 308]}

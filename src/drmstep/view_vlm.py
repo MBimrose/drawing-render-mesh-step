@@ -1,16 +1,20 @@
-"""VLM-driven view extraction.
+"""Combined VLM + LocateAnything view extraction.
 
-Asks the configured VLM (default: Qwen3-VL-235B via litellm) to identify the
-isometric / 3D pictorial view of the part and return its bounding box in pixel
-coordinates. Uses a two-pass strategy:
+Two grounding models cooperate to find the isometric pictorial:
 
-  Pass 1 (describe): "List all the views in this drawing." Forces the model to
-    enumerate views and disambiguate isometric from orthographic.
-  Pass 2 (locate): "Return the bbox of the isometric view as [x1,y1,x2,y2]."
-    Conditioned on the pass-1 description so the model commits to one view.
+  1. LocateAnything-3B (in-process) detects all "3D view of the part" regions.
+     Bboxes tend to be tight on actual ink content (the model is trained on
+     bbox grounding, not language understanding).
+  2. Qwen3-VL-235B (HTTP) describes the drawing's views and emits a coarse
+     bbox for the isometric, distinguishing it from orthographic views.
 
-If the model returns a degenerate or out-of-range bbox, we fall back to the
-classical CV extractor as a safety net.
+Combination strategy:
+  - If LocateAnything returns ≥1 plausible boxes, pick the one with maximum
+    overlap with Qwen's bbox. Take the UNION of the two to ensure no clipping.
+  - If LA returns nothing useful, fall back to Qwen's bbox alone.
+  - If both fail, fall back to classical CV.
+
+Final crop is padded 15% to absorb residual tightness.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import io
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -29,6 +34,11 @@ from PIL import Image
 from .config import Config
 
 logger = logging.getLogger(__name__)
+
+# LocateAnything-3B is in-process; serialize calls to avoid:
+#   1. Concurrent AutoModel.from_pretrained collisions during first load.
+#   2. CUDA contention on a single GPU when multiple threads call generate().
+_LA_LOCK = threading.Lock()
 
 _JSON_OBJ_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 _ARRAY_RE = re.compile(r"\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*[\]}]")
@@ -149,8 +159,84 @@ def _build_fallback_prompt(w: int, h: int, description: str) -> str:
     )
 
 
+def _locate_anything_boxes(
+    image: Image.Image, config: Config
+) -> list[tuple[int, int, int, int]]:
+    """Run NVIDIA LocateAnything-3B on ``image`` and return all bboxes it finds
+    that plausibly enclose a 3D view of a mechanical part. Coords are in the
+    pixel space of ``image``.
+
+    Returns an empty list on any failure (model load fail, no parse, no boxes).
+    """
+    try:
+        from .view_extract import _call_locate_anything, _LA_BOX_BLOCK_RE, _LA_NUM_RE
+    except Exception as exc:
+        logger.warning("LocateAnything backend unavailable: %s", exc)
+        return []
+
+    try:
+        with _LA_LOCK:
+            _, raw = _call_locate_anything(image, config)
+    except Exception as exc:
+        logger.warning("LocateAnything call failed: %s", exc)
+        return []
+    if not raw:
+        return []
+
+    w, h = image.size
+    boxes: list[tuple[int, int, int, int]] = []
+    for block in _LA_BOX_BLOCK_RE.findall(raw):
+        nums = _LA_NUM_RE.findall(block)
+        if len(nums) < 4:
+            continue
+        try:
+            x1n, y1n, x2n, y2n = (float(n) for n in nums[:4])
+        except ValueError:
+            continue
+        if max(x1n, y1n, x2n, y2n) > 1000:
+            continue
+        x1 = int(x1n / 1000.0 * w)
+        y1 = int(y1n / 1000.0 * h)
+        x2 = int(x2n / 1000.0 * w)
+        y2 = int(y2n / 1000.0 * h)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        area = (x2 - x1) * (y2 - y1) / float(w * h)
+        if area < 0.005 or area > 0.85:  # skip the "I dunno" full-image box
+            continue
+        boxes.append((x1, y1, x2, y2))
+    # dedupe while preserving order
+    seen = set()
+    unique: list[tuple[int, int, int, int]] = []
+    for b in boxes:
+        if b not in seen:
+            seen.add(b)
+            unique.append(b)
+    return unique
+
+
+def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter == 0:
+        return 0.0
+    a_area = (ax2 - ax1) * (ay2 - ay1)
+    b_area = (bx2 - bx1) * (by2 - by1)
+    return inter / float(a_area + b_area - inter)
+
+
+def _union(
+    a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
 def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResult:
-    """Two-pass VLM extraction: describe views, then locate isometric bbox.
+    """Combined LocateAnything + Qwen3-VL extraction.
 
     Returns bbox in **original-image pixel coordinates**, or None on failure.
     """
@@ -160,6 +246,15 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
     w_small, h_small = small.size
 
     img_url = _image_to_data_url(small)
+
+    # LocateAnything-3B detects all "3D view of the part" regions. Boxes are in
+    # full-image pixel coords; LA tends to crop tightly to ink content.
+    la_boxes_full = _locate_anything_boxes(full, config)
+    # Pre-rank by area so the largest comes first.
+    la_boxes_full.sort(
+        key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True
+    )
+    logger.info("LocateAnything boxes (largest first): %s", la_boxes_full[:5])
 
     # Pass 1: describe
     description = ""
@@ -231,49 +326,60 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         if not _is_degenerate(bbox_small_fb):
             bbox_small = bbox_small_fb
 
-    if bbox_small is None:
-        return VLMExtractResult(bbox_xyxy=None, raw_response=description + "\n---\n" + raw)
+    qwen_bbox_full: Optional[tuple[int, int, int, int]] = None
+    if bbox_small is not None:
+        # Qwen3-VL natively returns bboxes in 0–1000 normalized coords regardless
+        # of prompt wording. Detect and rescale to small-image pixels.
+        x1_raw, y1_raw, x2_raw, y2_raw = bbox_small
+        if (max(x1_raw, y1_raw, x2_raw, y2_raw) <= 1000
+                and (w_small > 1000 or h_small > 1000)):
+            logger.info("Qwen bbox looks normalized 0-1000; converting to pixels")
+            x1 = int(round(x1_raw / 1000.0 * w_small))
+            y1 = int(round(y1_raw / 1000.0 * h_small))
+            x2 = int(round(x2_raw / 1000.0 * w_small))
+            y2 = int(round(y2_raw / 1000.0 * h_small))
+        else:
+            x1, y1, x2, y2 = x1_raw, y1_raw, x2_raw, y2_raw
+        x1 = max(0, min(w_small, x1))
+        y1 = max(0, min(h_small, y1))
+        x2 = max(0, min(w_small, x2))
+        y2 = max(0, min(h_small, y2))
+        if x2 > x1 and y2 > y1:
+            area_frac = ((x2 - x1) * (y2 - y1)) / float(w_small * h_small)
+            if 0.005 <= area_frac <= 0.85:
+                sx, sy = w_full / w_small, h_full / h_small
+                qwen_bbox_full = (int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy))
 
-    # Qwen3-VL natively returns bboxes in 0–1000 normalized coordinates regardless
-    # of what we asked for in the prompt. Detect this by checking whether all
-    # coords ≤ 1000 (and the image is bigger than 1000 in either dim — otherwise
-    # they could legitimately be pixel coords).
-    x1_raw, y1_raw, x2_raw, y2_raw = bbox_small
-    if (max(x1_raw, y1_raw, x2_raw, y2_raw) <= 1000
-            and (w_small > 1000 or h_small > 1000)):
-        logger.info("VLM bbox looks normalized 0-1000; converting to pixels")
-        x1 = int(round(x1_raw / 1000.0 * w_small))
-        y1 = int(round(y1_raw / 1000.0 * h_small))
-        x2 = int(round(x2_raw / 1000.0 * w_small))
-        y2 = int(round(y2_raw / 1000.0 * h_small))
-    else:
-        x1, y1, x2, y2 = x1_raw, y1_raw, x2_raw, y2_raw
+    # Combination strategy:
+    #   - If both LA and Qwen produced boxes, pick the LA box with highest IoU
+    #     vs Qwen's bbox, then take the UNION so neither model's tightness wins.
+    #   - If only LA produced boxes, pick its largest.
+    #   - If only Qwen produced a bbox, use it.
+    #   - Otherwise fail.
+    chosen: Optional[tuple[int, int, int, int]] = None
+    if la_boxes_full and qwen_bbox_full is not None:
+        best_la = max(la_boxes_full, key=lambda b: _iou(b, qwen_bbox_full))
+        if _iou(best_la, qwen_bbox_full) > 0.1:
+            chosen = _union(best_la, qwen_bbox_full)
+            logger.info("Combined: LA=%s ∪ Qwen=%s → %s", best_la, qwen_bbox_full, chosen)
+        else:
+            # No overlap → trust LA's largest box (it found the part; Qwen may be off-target)
+            chosen = la_boxes_full[0]
+            logger.info("LA and Qwen disagree; using largest LA box: %s", chosen)
+    elif la_boxes_full:
+        chosen = la_boxes_full[0]
+        logger.info("Only LA found boxes; using largest: %s", chosen)
+    elif qwen_bbox_full is not None:
+        chosen = qwen_bbox_full
+        logger.info("Only Qwen produced a bbox; using it: %s", chosen)
 
-    # Validate: bbox must be inside image bounds, non-degenerate, and not the entire image.
-    x1 = max(0, min(w_small, x1))
-    y1 = max(0, min(h_small, y1))
-    x2 = max(0, min(w_small, x2))
-    y2 = max(0, min(h_small, y2))
-    if x2 <= x1 or y2 <= y1:
-        return VLMExtractResult(bbox_xyxy=None, raw_response=description + "\n---\n" + raw)
-    area_frac = ((x2 - x1) * (y2 - y1)) / float(w_small * h_small)
-    if area_frac < 0.005:
-        logger.info("VLM bbox too small (%.3f); rejecting", area_frac)
-        return VLMExtractResult(bbox_xyxy=None, raw_response=description + "\n---\n" + raw)
-    if area_frac > 0.85:
-        logger.info("VLM bbox covers whole page (%.3f); rejecting", area_frac)
-        return VLMExtractResult(bbox_xyxy=None, raw_response=description + "\n---\n" + raw)
+    if chosen is None:
+        return VLMExtractResult(bbox_xyxy=None,
+                                raw_response=description + "\n---\n" + raw)
 
-    # Map small-image bbox back to full-res coords.
-    sx, sy = w_full / w_small, h_full / h_small
-    bbox_full = (int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy))
-
-    # Apply generous 20% padding — Qwen3-VL's bboxes are consistently too tight
-    # on isometric views, often clipping the part's outermost features
-    # (fillets, edges, protrusions). 20% recovers them at the cost of some
-    # extra whitespace, which Hunyuan3D handles fine.
-    pad = 0.20
-    fx1, fy1, fx2, fy2 = bbox_full
+    # Apply 15% padding so we don't clip features from either model's bbox.
+    pad = 0.15
+    fx1, fy1, fx2, fy2 = chosen
     pad_x = int((fx2 - fx1) * pad)
     pad_y = int((fy2 - fy1) * pad)
     padded = (

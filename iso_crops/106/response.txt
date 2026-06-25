@@ -1,3 +1,3 @@
-The drawing shows an isometric pictorial view, a front view, a top view, and a right-side view. The isometric pictorial is located in the upper-right quadrant of the page and occupies roughly 1/4 of the sheet area. It is the only 3D pictorial of the whole part and is the largest such view present.
+The drawing shows an isometric pictorial view, a front view, a top view, and a right-side view. The isometric pictorial is located in the upper-right quadrant of the sheet, occupying roughly a 3x3 grid cell area (columns 9–11, rows A–C). It is the only 3D pictorial of the whole part and is the largest such view present.
 ---
-{"bbox": [720, 158, 940, 475]}
+{"bbox": [730, 140, 940, 440]}

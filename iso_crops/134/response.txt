@@ -1,3 +1,3 @@
 The drawing includes: top view, front view, side view, section A-A, detail D, and one isometric pictorial. The isometric view is located in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is the only 3D pictorial of the whole part and is approximately 3x3 inches in size on the sheet.
 ---
-{"bbox": [1152, 100, 1400, 450]}
+{"bbox": [1152, 100, 1400, 400]}

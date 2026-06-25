@@ -1,3 +1,3 @@
-The drawing includes top, front, side, section A-A, section B-B, and two isometric pictorials. The largest isometric pictorial of the whole part is in the upper-right quadrant, roughly 2.5 inches wide by 2 inches tall. A second, smaller isometric view appears below it in the center-right area. Both are shaded 3D renderings, not orthographic or sectional views.
+The drawing includes top, front, side, section A-A, section B-B, and two isometric pictorials. The largest isometric pictorial of the whole part is in the upper-right quadrant, roughly 2.5 x 2 inches. A second, smaller isometric view appears below it in the center-right area. Both are shaded 3D renderings, not orthographic or sectional views.
 ---
-{"bbox": [778, 140, 920, 378]}
+{"bbox": [784, 140, 920, 380]}
