@@ -53,9 +53,9 @@ class Config(BaseModel):
     cadfit_python: Path = Field(
         default_factory=lambda: REPO_ROOT / "third_party" / "CADFit" / ".venv" / "bin" / "python"
     )
-    cadfit_max_iterations: int = 3
+    cadfit_max_iterations: int = 10
     cadfit_fillet_chamfer: bool = True
-    cadfit_timeout_s: float = 1200.0
+    cadfit_timeout_s: float = 3600.0
 
     # CadQuery runner
     cadquery_python: Path = Field(

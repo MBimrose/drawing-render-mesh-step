@@ -31,22 +31,21 @@ class ScaleResult:
     raw_response: str
 
 
-SYSTEM_PROMPT = """You read mechanical engineering drawings and emit a single uniform scale factor.
+SYSTEM_PROMPT = """You read mechanical engineering drawings and emit the largest real-world dimension.
 
-You will be given (a) an annotated engineering drawing with orthographic and isometric views,
-(b) the task description text, and (c) the current LARGEST bounding-box edge length of a
-candidate mesh (in arbitrary units, normalized roughly to a unit cube). Your job: identify
-the largest real-world dimension implied by the drawing, then emit a single multiplicative
-scale factor ``s`` such that
+You will be given (a) an annotated engineering drawing with orthographic and isometric views
+and (b) the task description text. Your job: read the dimension annotations on the drawing
+and identify the LARGEST real-world dimension of the part (typically an overall length,
+diameter, or width), in millimeters.
 
-    s * max(candidate_dims) ~= max(target_real_world_dims_in_mm)
-
-Notes:
-- Read the largest printed dimension on the drawing (typically a Ø value or an overall
-  length annotation). Express it in mm.
-- Return ONLY a single JSON object, no prose, no markdown, in this exact schema:
-    {"scale": <float>, "unit": "mm", "rationale": "<one short line>"}
-- Default unit is "mm" unless the drawing clearly uses another.
+Rules:
+- Look at ALL dimension annotations on the drawing (overall lengths, diameters marked with Ø,
+  widths, heights).
+- Pick the single LARGEST value you can read.
+- If the drawing has no explicit dimensions, estimate the overall size from the drawing scale
+  or from the task description.
+- Return ONLY a single JSON object, no prose, no markdown:
+    {"target_max_mm": <float>, "rationale": "<which dimension, e.g. 'overall length 200mm'>"}
 """
 
 
@@ -143,40 +142,34 @@ def compute_scale(
             break
         raw = resp.choices[0].message.content or ""
         parsed = _parse_json(raw)
-        if parsed and "scale" in parsed:
+        if parsed and "target_max_mm" in parsed:
             break
         completion_kwargs["messages"].append({"role": "assistant", "content": raw})
         completion_kwargs["messages"].append({
             "role": "user",
             "content": "Your previous response did not parse as the required JSON schema. "
-                       'Reply with ONLY: {"scale": <float>, "unit": "mm", "rationale": "..."}'
+                       'Reply with ONLY: {"target_max_mm": <float>, "rationale": "..."}'
         })
 
-    if not parsed or "scale" not in parsed:
+    if not parsed or "target_max_mm" not in parsed:
         logger.warning("scaling: could not parse JSON; using uniform fallback")
         return _fallback_uniform(target_max_fallback, cmax)
 
     try:
-        s = float(parsed["scale"])
+        target_max = float(parsed["target_max_mm"])
     except (TypeError, ValueError) as exc:
         logger.warning("scaling: bad float in parsed JSON: %s", exc)
         return _fallback_uniform(target_max_fallback, cmax)
 
-    # The VLM emits the *target real-world max dim*. Convert to a multiplicative factor
-    # by dividing by the candidate's current max dim. (Both VLMs and Claude tend to put
-    # the millimeter value here, not the multiplicative factor.) Heuristic: if the value
-    # is between 0.1 and 20 and the candidate_max is also ~1, treat it as a pure ratio.
-    if cmax > 0 and (s < 0.2 or s > 50):
-        # value looks like a target dim in mm — convert
-        factor = s / cmax
-    else:
-        # value already looks like a unit-scale ratio
-        factor = s
+    if target_max <= 0 or cmax <= 0:
+        return _fallback_uniform(target_max_fallback, cmax)
+
+    factor = target_max / cmax
 
     return ScaleResult(
         sx=factor, sy=factor, sz=factor,
-        unit=str(parsed.get("unit", "mm")),
-        rationale=f"requested target_max={s:.2f}, candidate_max={cmax:.4f} → s={factor:.4f}; "
+        unit="mm",
+        rationale=f"target_max={target_max:.2f}mm / candidate_max={cmax:.4f} → s={factor:.4f}; "
                   + str(parsed.get("rationale", ""))[:120],
         raw_response=raw,
     )
