@@ -74,16 +74,31 @@ def run_generation(
     logger.info("[%s] mesh generation", sample)
     mesh_stl = mesh_generate.image_to_mesh(extracted.image, work / "mesh.stl", config)
 
-    # 3. CAD fitting
+    # 3. CAD fitting. If CADFit can't fit primitives to the part, we still have a
+    # Hunyuan3D mesh — the benchmark accepts STL as a lower-tier candidate, so
+    # we route there instead of failing the sample.
     logger.info("[%s] CADFit", sample)
-    cadfit = cad_fit.run_cadfit(mesh_stl, work / "cadfit", config)
+    try:
+        cadfit = cad_fit.run_cadfit(mesh_stl, work / "cadfit", config)
+    except cad_fit.CadFitError as exc:
+        logger.warning("[%s] CADFit emitted no program (%s); using Hunyuan mesh", sample, exc)
+        # 4'. scaling from the Hunyuan mesh itself (no CADFit recon to compare against).
+        scale = scaling.compute_scale(drawing, task_description, mesh_stl, config)
+        (work / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
+        output_stl = out_dir / "output.stl"
+        _scale_stl_and_save(mesh_stl, output_stl, (scale.sx, scale.sy, scale.sz))
+        return SampleResult(
+            sample=sample, status="hunyuan_only", output_path=output_stl,
+            cadfit_iou=None, scale=(scale.sx, scale.sy, scale.sz),
+            notes=f"cadfit: {exc}",
+        )
 
     # 4. scaling
     logger.info("[%s] scaling", sample)
     scale = scaling.compute_scale(drawing, task_description, cadfit.recon_stl, config)
     (work / "scale.json").write_text(json.dumps(asdict(scale), indent=2))
 
-    # 5. execute -> output.step (fallback to output.stl on cq error)
+    # 5. execute -> output.step (fallback to scaled recon STL on cq exec error)
     output_step = out_dir / "output.step"
     try:
         runners.execute_cadquery(

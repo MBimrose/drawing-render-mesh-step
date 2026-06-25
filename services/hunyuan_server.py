@@ -29,10 +29,21 @@ def main() -> None:
     parser.add_argument("--limit-model-concurrency", dest="limit_concurrency",
                         type=int, default=5)
     parser.add_argument("--enable_tex", action="store_true")
+    parser.add_argument("--enable_flashvdm", action="store_true",
+                        help="Re-enable the FlashVDM fast-VAE path (off by default).")
     args = parser.parse_args()
 
     import api_server  # noqa: E402  loads upstream module without side effects
     import uvicorn
+
+    if not args.enable_flashvdm:
+        # Upstream's ModelWorker calls self.pipeline.enable_flashvdm(mc_algo='mc')
+        # unconditionally. Stub it to a no-op so we run the full (non-flash) VAE
+        # path for highest mesh fidelity.
+        _orig_enable = api_server.Hunyuan3DDiTFlowMatchingPipeline.enable_flashvdm
+        def _noop_enable_flashvdm(self, *a, **kw):
+            print("[drmstep] FlashVDM disabled (use --enable_flashvdm to turn back on)")
+        api_server.Hunyuan3DDiTFlowMatchingPipeline.enable_flashvdm = _noop_enable_flashvdm
 
     api_server.args = argparse.Namespace(
         host=args.host,

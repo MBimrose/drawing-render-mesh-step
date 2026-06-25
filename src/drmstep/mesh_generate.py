@@ -1,4 +1,10 @@
-"""Hunyuan3D-2 HTTP client. Talks to the FastAPI server in services/start_hunyuan.sh."""
+"""Hunyuan3D-2 HTTP client + watertight cleanup.
+
+Talks to the FastAPI server launched by ``services/start_hunyuan.sh``. After
+receiving the GLB, manifoldifies the mesh via pymeshlab's alpha-wrap so CADFit's
+manifold3d-based IoU computation can actually compare it (raw Hunyuan output is
+non-watertight, which collapses every CADFit candidate to IoU=0).
+"""
 
 from __future__ import annotations
 
@@ -8,12 +14,20 @@ import logging
 from pathlib import Path
 
 import httpx
+import pymeshlab
 import trimesh
 from PIL import Image
 
 from .config import Config
 
 logger = logging.getLogger(__name__)
+
+# Alpha-wrap parameters tuned for Hunyuan3D-2 output (mesh normalized roughly to ±1).
+# Smaller alpha_fraction = more faces / sharper detail preserved; smaller offset_fraction
+# = less inflation of the wrap shell. These keep small features (holes, fillets) while
+# closing self-intersections so manifold3d-based IoU can score the candidate.
+_ALPHA_WRAP_FRACTION = 0.003
+_OFFSET_FRACTION = 0.001
 
 
 class MeshGenError(RuntimeError):
@@ -26,11 +40,37 @@ def _image_to_b64(image: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def image_to_mesh(image: Image.Image, out_stl: Path, config: Config) -> Path:
-    """POST a PIL image to Hunyuan3D-2 /generate. Save the returned GLB as STL.
+def _manifoldify(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Run pymeshlab's alpha-wrap to produce a watertight version of ``mesh``.
 
-    Returns the STL path. Raises MeshGenError on transport or load failure.
+    Falls back to the input mesh on any pymeshlab failure (e.g. degenerate input).
     """
+    if mesh.is_watertight:
+        return mesh
+    try:
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=mesh.vertices, face_matrix=mesh.faces))
+        ms.generate_alpha_wrap(
+            alpha_fraction=_ALPHA_WRAP_FRACTION,
+            offset_fraction=_OFFSET_FRACTION,
+        )
+        cm = ms.current_mesh()
+        wrapped = trimesh.Trimesh(vertices=cm.vertex_matrix(), faces=cm.face_matrix())
+        if not wrapped.is_watertight:
+            logger.warning("alpha-wrap output still non-watertight; using raw mesh")
+            return mesh
+        logger.info(
+            "alpha-wrap: %d → %d faces, watertight, vol=%.4f",
+            len(mesh.faces), len(wrapped.faces), wrapped.volume,
+        )
+        return wrapped
+    except Exception as exc:
+        logger.warning("alpha-wrap failed (%s); using raw mesh", exc)
+        return mesh
+
+
+def image_to_mesh(image: Image.Image, out_stl: Path, config: Config) -> Path:
+    """POST a PIL image to Hunyuan3D-2 /generate, alpha-wrap to watertight, save as STL."""
     payload = {
         "image": _image_to_b64(image),
         "num_inference_steps": config.hunyuan_num_inference_steps,
@@ -57,7 +97,10 @@ def image_to_mesh(image: Image.Image, out_stl: Path, config: Config) -> Path:
     if not isinstance(scene, trimesh.Trimesh) or scene.is_empty:
         raise MeshGenError("hunyuan3d returned empty mesh")
 
+    sealed = _manifoldify(scene)
     out_stl.parent.mkdir(parents=True, exist_ok=True)
-    scene.export(out_stl)
-    logger.info("wrote %s (%d faces)", out_stl, len(scene.faces))
+    sealed.export(out_stl)
+    logger.info(
+        "wrote %s (%d faces, watertight=%s)", out_stl, len(sealed.faces), sealed.is_watertight,
+    )
     return out_stl
