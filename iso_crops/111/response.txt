@@ -1,3 +1,3 @@
-The drawing includes: front view, section A-A, detail B, detail C, isometric view, and two auxiliary orthographic views (left and right side projections). The isometric pictorial is located in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is the largest 3D pictorial of the whole part, occupying about 1/6 of the total drawing area. No other full-part 3D views are present.
+The drawing includes: front view (main orthographic), section A-A, detail B, detail C, isometric view, and a side/auxiliary view near the bottom right. The isometric pictorial is located in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is the largest 3D pictorial of the whole part, occupying about 1/6 of the total drawing area. No other full-part 3D views are present.
 ---
-{"bbox": [784, 124, 958, 487]}
+{"bbox": [778, 124, 958, 503]}

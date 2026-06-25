@@ -123,10 +123,12 @@ def _build_locate_prompt(w: int, h: int, description: str) -> str:
     return (
         f"The image is {w} pixels wide by {h} pixels tall.\n\n"
         f"Earlier description of the drawing's views:\n{description}\n\n"
-        "Now return the TIGHT bounding box of the isometric pictorial view of the whole part. "
+        "Now return the bounding box of the isometric pictorial view of the whole part. "
         "If multiple 3D pictorial views exist, pick the LARGEST single one. "
-        "The bbox must crop ONLY the 3D view, excluding orthographic projections, section "
-        "views, dimension callouts, leader lines, and the title block. "
+        "IMPORTANT: be GENEROUS — the bbox MUST include EVERY pixel of the 3D pictorial "
+        "(every fillet, every hole, every feature, every protrusion) plus a small margin "
+        "of whitespace around it. It is MUCH worse to cut off part of the geometry than "
+        "to include some extra blank space. Do not include other views or the title block. "
         "Reply with ONLY the JSON object: {\"bbox\": [x1, y1, x2, y2]}"
     )
 
@@ -137,10 +139,12 @@ def _build_fallback_prompt(w: int, h: int, description: str) -> str:
         f"The image is {w} pixels wide by {h} pixels tall.\n\n"
         f"Earlier description of the drawing's views:\n{description}\n\n"
         "No isometric pictorial view of the whole part is available. Instead, return the "
-        "TIGHT bounding box of the SINGLE most informative orthographic view — the one that "
-        "shows the part's overall shape most clearly. Prefer the front or side view over "
-        "top views, and prefer a full view over a section/detail view. The bbox must crop "
-        "ONLY that single view, excluding dimension callouts, other views, and the title block. "
+        "bounding box of the SINGLE most informative orthographic view — the one that shows "
+        "the part's overall shape most clearly. Prefer the front or side view over top views, "
+        "and prefer a full view over a section/detail view. "
+        "IMPORTANT: be GENEROUS — the bbox MUST include every pixel of the geometry plus "
+        "a small whitespace margin. Cutting off part of the part is MUCH worse than including "
+        "extra blank space. Do not include other views or the title block. "
         "Reply with ONLY the JSON object: {\"bbox\": [x1, y1, x2, y2]}"
     )
 
@@ -264,8 +268,11 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
     sx, sy = w_full / w_small, h_full / h_small
     bbox_full = (int(x1 * sx), int(y1 * sy), int(x2 * sx), int(y2 * sy))
 
-    # Apply 4% padding so we don't clip the part outline.
-    pad = 0.04
+    # Apply generous 20% padding — Qwen3-VL's bboxes are consistently too tight
+    # on isometric views, often clipping the part's outermost features
+    # (fillets, edges, protrusions). 20% recovers them at the cost of some
+    # extra whitespace, which Hunyuan3D handles fine.
+    pad = 0.20
     fx1, fy1, fx2, fy2 = bbox_full
     pad_x = int((fx2 - fx1) * pad)
     pad_y = int((fy2 - fy1) * pad)

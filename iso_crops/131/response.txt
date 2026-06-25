@@ -1,3 +1,3 @@
-The drawing includes orthographic views (front, side), sections (A-A, B-B, E-E), details (C, D), and two isometric pictorials. The largest isometric pictorial of the whole part is located in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is shaded with hidden lines and shows the full 3D form, approximately 3–4 inches wide on the page. A second, smaller isometric view appears below it in rows C–D.
+The drawing includes orthographic views (front, side), sections (A-A, B-B, E-E), details (C, D), and two isometric pictorials. The largest isometric pictorial of the whole part is in the upper-right quadrant, roughly spanning grid columns 9–12 and rows A–C. It is shaded/lined and shows the full 3D form, larger than the second, smaller isometric view below it.
 ---
-{"bbox": [788, 134, 930, 308]}
+{"bbox": [788, 124, 940, 310]}

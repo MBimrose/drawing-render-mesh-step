@@ -1,3 +1,3 @@
-The drawing includes a front view, top view, right-side view, Detail A, and an isometric pictorial. The isometric view is located in the upper-right quadrant (grid area G10–H12), occupying roughly 3x2 grid squares. It is the only 3D pictorial of the whole part and is the largest such view on the sheet.
+The drawing includes a front view, top view, right-side view, Detail A, and an isometric pictorial. The isometric view is located in the upper-right quadrant (grid area G7–H10), roughly 3x2 grid squares in size. It is the only 3D pictorial of the whole part and is the largest such view present.
 ---
-{"bbox": [758, 158, 967, 450]}
+{"bbox": [758, 158, 970, 470]}
