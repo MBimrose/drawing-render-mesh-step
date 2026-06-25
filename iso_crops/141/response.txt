@@ -1,0 +1,3 @@
+The drawing includes top, front, side, section A-A, detail B, and two isometric pictorials. The largest isometric pictorial is in the upper-right quadrant, roughly 1/4 the page width, showing the full part with bolt holes and flange. A second, smaller isometric view is below it, slightly to the left. Both are shaded 3D renderings, not orthographic projections.
+---
+{"bbox": [784, 507, 970, 770]}

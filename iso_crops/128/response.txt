@@ -1,0 +1,3 @@
+The drawing shows a front view, top view, and a right-side sectional view (indicated by “C-C” cut lines). An isometric pictorial view of the whole part is located in the upper-right corner, approximately 20% of the page width and height. A second, smaller isometric view (top-down perspective) is also in the upper-right, but the first is larger and shows the full 3D form.
+---
+{"bbox": [688, 75, 838, 285]}

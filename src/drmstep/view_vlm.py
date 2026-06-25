@@ -238,6 +238,56 @@ def _union(
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
+def _clean_outside_hull(image: Image.Image, bbox: tuple[int, int, int, int]) -> Image.Image:
+    """Crop ``image`` to ``bbox`` and white out ink OUTSIDE the convex hull of the
+    largest part-shaped blob found inside. Bbox dimensions are preserved (no
+    tightening); we only erase the ink that doesn't belong to the part.
+    """
+    w_full, h_full = image.size
+    x1, y1, x2, y2 = bbox
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w_full, x2), min(h_full, y2)
+    if x2 <= x1 or y2 <= y1:
+        return image.crop(bbox)
+    crop = image.crop((x1, y1, x2, y2)).convert("RGB")
+    cw, ch = crop.size
+
+    gray = np.array(crop.convert("L"))
+    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    close_k = max(5, int(min(cw, ch) * 0.012))
+    closed = cv2.morphologyEx(
+        binary, cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (close_k, close_k)),
+    )
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
+    if num <= 1:
+        return crop
+    label = _pick_part_blob(stats, cw, ch)
+    if label == 0:
+        return crop
+
+    component_mask = (labels == label).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(
+        component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+    )
+    interior_mask = np.zeros_like(component_mask)
+    if contours:
+        hull = cv2.convexHull(np.concatenate(contours))
+        cv2.drawContours(interior_mask, [hull], -1, 255, thickness=-1)
+        dilate_k = max(3, int(min(cw, ch) * 0.005))
+        interior_mask = cv2.dilate(
+            interior_mask,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (dilate_k, dilate_k)),
+        )
+    else:
+        interior_mask = component_mask
+
+    arr = np.array(crop)
+    outside_hull = (interior_mask == 0) & (binary > 0)
+    arr[outside_hull] = (255, 255, 255)
+    return Image.fromarray(arr)
+
+
 def _pick_part_blob(stats: np.ndarray, cw: int, ch: int) -> int:
     """Pick the connected-component label that is most likely the part.
 
@@ -514,26 +564,56 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
                 )
 
     # Combination strategy:
-    #   - If both models produced boxes AND they agree (IoU > 0.1), take the
-    #     UNION so neither model's tightness wins. Qwen often understates the
-    #     bbox; LA captures the tight content envelope.
-    #   - If they disagree, TRUST QWEN. LA grounds purely on visual texture and
-    #     frequently mistakes shaded section/detail views (e.g. fixture 110)
-    #     for "3D views of the part". Qwen reads the view labels.
-    #   - If only LA produced boxes, pick its largest (Qwen failed; it's the
-    #     best content-tight guess we have).
+    #   - If both models produced boxes:
+    #       * If LA's LARGEST box overlaps Qwen's bbox (IoU > 0.1): take their
+    #         union — this is the "they agree, just slightly different shape"
+    #         case.
+    #       * Else if LA's largest box's CENTER is reasonably close to Qwen's
+    #         center (within ~35% of image diagonal): pages with multiple iso
+    #         views where Qwen mis-identified which is the largest. Trust LA's
+    #         largest, since LA reliably tracks bbox size while Qwen often
+    #         picks the wrong "largest" view (fixture 127's two isos).
+    #       * Else: TRUST QWEN. LA likely hallucinated a section/detail view
+    #         (fixture 110's section circle). Qwen reads the view labels.
+    #   - If only LA produced boxes, pick its largest.
     #   - If only Qwen produced a bbox, use it.
     #   - Otherwise fail.
+    def _center(b):
+        return ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
+
+    def _distinct_la_boxes(boxes, iou_thresh=0.7):
+        """Cluster near-duplicate LA boxes; return one representative per cluster."""
+        out: list[tuple[int, int, int, int]] = []
+        for b in boxes:
+            if not any(_iou(b, o) > iou_thresh for o in out):
+                out.append(b)
+        return out
+
     chosen: Optional[tuple[int, int, int, int]] = None
     if la_boxes_full and qwen_bbox_full is not None:
-        best_la = max(la_boxes_full, key=lambda b: _iou(b, qwen_bbox_full))
-        if _iou(best_la, qwen_bbox_full) > 0.1:
+        distinct_la = _distinct_la_boxes(la_boxes_full)
+        # Match LA boxes against Qwen by IoU. Qwen knows the view-type (iso vs
+        # section/detail); LA gives tighter content envelopes. The IOU-matching
+        # LA box is the one Qwen's "this is an iso" judgement endorses.
+        matching_la = [b for b in distinct_la if _iou(b, qwen_bbox_full) > 0.1]
+        if matching_la:
+            # Among LA boxes that Qwen endorses as overlapping the iso area,
+            # pick the largest. UNION with Qwen so we don't shrink either bbox.
+            best_la = max(matching_la,
+                          key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
             chosen = _union(best_la, qwen_bbox_full)
-            logger.info("Combined: LA=%s ∪ Qwen=%s → %s", best_la, qwen_bbox_full, chosen)
+            logger.info(
+                "Matched LA=%s with Qwen=%s → %s "
+                "(picked from %d Qwen-overlapping LA candidate%s)",
+                best_la, qwen_bbox_full, chosen,
+                len(matching_la), "s" if len(matching_la) != 1 else "",
+            )
         else:
+            # No LA box overlaps Qwen → LA likely picked a section/detail view.
+            # Trust Qwen.
             chosen = qwen_bbox_full
-            logger.info("LA and Qwen disagree; trusting Qwen: %s (LA was %s)",
-                        chosen, best_la)
+            logger.info("No LA box overlaps Qwen; trusting Qwen: %s "
+                        "(largest LA was %s)", chosen, la_boxes_full[0])
     elif la_boxes_full:
         chosen = la_boxes_full[0]
         logger.info("Only LA found boxes; using largest: %s", chosen)
@@ -564,16 +644,12 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         min(trim_y2, fy2 + pad_y),
     )
 
-    # Then tighten to the part-shaped blob inside that padded region. Ink
-    # outside the chosen component's convex hull (ruler letters, adjacent
-    # dimension callouts, neighbouring views) is whited out; ink inside the
-    # hull (the part's internal features, dimension lines, hole indicators)
-    # is preserved.
+    # Tighten to the part-shaped blob inside the padded region.
     _, tight_bbox = _tighten_to_largest_blob(full, padded)
 
-    # Defensive: never end up with a bbox SMALLER than what the model originally
-    # picked — tightening should only remove adjacent junk, not chop into the
-    # actual view. Union the tightened bbox with the (un-padded) seed.
+    # Defensive: never end up smaller than the seed — tightening should only
+    # remove adjacent junk, not chop into the actual view. Union the tightened
+    # bbox with the (un-padded) seed.
     final_bbox = _union(tight_bbox, chosen)
     # Clamp to the trimmed region so we still avoid the page frame/rulers.
     final_bbox = (
@@ -583,19 +659,10 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
         min(off_y + trimmed.size[1], final_bbox[3]),
     )
 
-    # Re-run the cleaning step on the final bbox so the whited-out crop matches.
-    cleaned, _ = _tighten_to_largest_blob(full, final_bbox, pad_frac=0.0)
-    # _tighten can shrink again — if it did, prefer the wider union bbox and
-    # re-crop the cleaned full image to that.
-    bx1, by1, bx2, by2 = final_bbox
-    cleaned_full = full.copy()
-    arr_full = np.array(cleaned_full)
-    crop_arr = np.array(cleaned)
-    # Paste cleaned region back at the correct offset — this is the "cleaned"
-    # version of the *union* bbox.
-    if cleaned.size != (bx2 - bx1, by2 - by1):
-        # Recompute the cleaning on the exact final bbox.
-        cleaned, _ = _tighten_to_largest_blob(full, final_bbox, pad_frac=0.0)
+    # Apply ink-cleanup (not bbox-tightening) on the final bbox. This whites
+    # out adjacent content (ruler letters, neighbouring views) without altering
+    # the bbox dimensions.
+    cleaned = _clean_outside_hull(full, final_bbox)
 
     return VLMExtractResult(
         bbox_xyxy=final_bbox,

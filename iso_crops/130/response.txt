@@ -1,0 +1,3 @@
+The drawing includes front, top, right-side, and isometric views, plus a detailed “VIEW A” (likely a section or auxiliary view). The primary isometric pictorial is in the upper-right corner, showing the full 3D part with visible mounting flanges and cutouts. It occupies roughly 20% of the page width and is the largest 3D rendering present. No other full-part isometric views are shown.
+---
+{"bbox": [840, 0, 1000, 220]}
