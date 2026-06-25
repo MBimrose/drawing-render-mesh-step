@@ -15,12 +15,14 @@ if [[ ! -f "$META" ]]; then
     cat > "$META" <<JSON
 {
   "submission_name": "drawing-render-mesh-step",
-  "method": "LocateAnything-3B -> Hunyuan3D-2 -> CADFit -> Claude scaling",
+  "method": "LocateAnything-3B + Qwen3-VL-235B view extraction -> Hunyuan3D-2 -> CADFit -> multi-dim Qwen3-VL scaling",
   "authors": ["MBimrose"]
 }
 JSON
 fi
 
 cd "$SUB_DIR"
-zip -r "$OUT_ZIP" . -x "*/_work/*" "*/conversation.json" "_drmstep_run.json"
+zip -r "$OUT_ZIP" . -x "*/_work/*" "*/conversation.json" "_drmstep_run.json" "_batch_results.json"
 echo "wrote $OUT_ZIP"
+echo "contents:"
+unzip -l "$OUT_ZIP" 2>/dev/null | head -20
