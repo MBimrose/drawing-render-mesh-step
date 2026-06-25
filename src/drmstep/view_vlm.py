@@ -604,31 +604,51 @@ def extract_isometric_bbox(image: Image.Image, config: Config) -> VLMExtractResu
                 out.append(b)
         return out
 
+    def _upper_right_score(b: tuple[int, int, int, int]) -> float:
+        """0..1 score, higher = closer to upper-right corner.
+
+        ISO/ANSI drafting convention places the isometric pictorial in the
+        upper-right corner of the sheet. When multiple plausible candidates
+        exist, the user wants the one furthest up + furthest right.
+        """
+        cx = (b[0] + b[2]) / 2.0
+        cy = (b[1] + b[3]) / 2.0
+        return ((cx / w_full) + (1.0 - cy / h_full)) / 2.0
+
     chosen: Optional[tuple[int, int, int, int]] = None
     if la_boxes_full and qwen_bbox_full is not None:
         distinct_la = _distinct_la_boxes(la_boxes_full)
-        # Match LA boxes against Qwen by IoU. Qwen knows the view-type (iso vs
-        # section/detail); LA gives tighter content envelopes. The IOU-matching
-        # LA box is the one Qwen's "this is an iso" judgement endorses.
-        matching_la = [b for b in distinct_la if _iou(b, qwen_bbox_full) > 0.1]
-        if matching_la:
-            # Among LA boxes that Qwen endorses as overlapping the iso area,
-            # pick the largest. UNION with Qwen so we don't shrink either bbox.
-            best_la = max(matching_la,
-                          key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
-            chosen = _union(best_la, qwen_bbox_full)
-            logger.info(
-                "Matched LA=%s with Qwen=%s → %s "
-                "(picked from %d Qwen-overlapping LA candidate%s)",
-                best_la, qwen_bbox_full, chosen,
-                len(matching_la), "s" if len(matching_la) != 1 else "",
-            )
-        else:
-            # No LA box overlaps Qwen → LA likely picked a section/detail view.
-            # Trust Qwen.
-            chosen = qwen_bbox_full
-            logger.info("No LA box overlaps Qwen; trusting Qwen: %s "
-                        "(largest LA was %s)", chosen, la_boxes_full[0])
+        # Position bias dominates: the user's drafting convention rule
+        # ("when in doubt, take the one further up or right").
+        ur_q = _upper_right_score(qwen_bbox_full)
+        candidates = [(qwen_bbox_full, ur_q, "qwen")]
+        for b in distinct_la:
+            candidates.append((b, _upper_right_score(b), "la"))
+
+        # Filter to candidates that overlap or are near the upper-right cluster.
+        # If Qwen described an iso in upper-right (ur_q high), reject LA boxes
+        # that are clearly elsewhere on the page (lower or far-left).
+        ur_cutoff = max(0.45, ur_q - 0.10)
+        viable = [(b, s, src) for (b, s, src) in candidates if s >= ur_cutoff]
+        if not viable:
+            viable = candidates  # nothing satisfies the cutoff; keep all
+
+        # Choose the candidate with the highest upper-right score.
+        chosen_tuple = max(viable, key=lambda t: t[1])
+        chosen = chosen_tuple[0]
+        logger.info(
+            "Picked %s bbox %s (ur=%.2f) from %d viable candidates "
+            "(qwen ur=%.2f, %d LA)",
+            chosen_tuple[2], chosen, chosen_tuple[1],
+            len(viable), ur_q, len(distinct_la),
+        )
+
+        # If the chosen bbox is an LA box AND Qwen's bbox is in roughly the
+        # same neighbourhood (IoU > 0.1), union them so we don't lose any
+        # part-margin from Qwen's wider view.
+        if chosen is not qwen_bbox_full and _iou(chosen, qwen_bbox_full) > 0.1:
+            chosen = _union(chosen, qwen_bbox_full)
+            logger.info("Unioned with Qwen for margin → %s", chosen)
     elif la_boxes_full:
         chosen = la_boxes_full[0]
         logger.info("Only LA found boxes; using largest: %s", chosen)
